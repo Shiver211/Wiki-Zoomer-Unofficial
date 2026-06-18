@@ -22,6 +22,7 @@
   "gui.wikizoomer.resolution": "分辨率：%sx%s",
   "gui.wikizoomer.batch_select_all": "全选",
   "gui.wikizoomer.batch_clear": "清除",
+  "gui.wikizoomer.batch_resolution": "分辨率：%s",
   "gui.wikizoomer.batch_start": "开始导出",
   "gui.wikizoomer.batch_no_mods": "至少选择一个模组",
   "gui.wikizoomer.batch_no_types": "请选择物品或实体",

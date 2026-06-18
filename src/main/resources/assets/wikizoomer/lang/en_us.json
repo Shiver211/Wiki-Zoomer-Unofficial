@@ -22,6 +22,7 @@
   "gui.wikizoomer.resolution": "Resolution: %sx%s",
   "gui.wikizoomer.batch_select_all": "Select All",
   "gui.wikizoomer.batch_clear": "Clear",
+  "gui.wikizoomer.batch_resolution": "Resolution: %s",
   "gui.wikizoomer.batch_start": "Start Export",
   "gui.wikizoomer.batch_no_mods": "Select at least one mod",
   "gui.wikizoomer.batch_no_types": "Select items or entities",

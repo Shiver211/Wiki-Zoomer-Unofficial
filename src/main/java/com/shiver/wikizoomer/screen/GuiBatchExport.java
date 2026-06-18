@@ -39,6 +39,7 @@ public class GuiBatchExport extends Screen {
     private boolean visibleSettingsForEntities = false;
     private boolean zoomManuallyAdjusted = false;
     private boolean backgroundManuallyAdjusted = false;
+    private boolean exportSizeManuallyAdjusted = false;
 
     public GuiBatchExport() {
         super(Component.translatable("gui.wikizoomer.batch_title"));
@@ -93,7 +94,8 @@ public class GuiBatchExport extends Screen {
         this.addRenderableWidget(new ZoomSlider(col1X, row2Y, buttonWidth, buttonHeight));
 
         this.addRenderableWidget(Button.builder(
-                Component.translatable("gui.wikizoomer.resolution", getExportSize(), getExportSize()), (button) -> {
+                getResolutionButtonLabel(), (button) -> {
+                    exportSizeManuallyAdjusted = true;
                     exportSizeIndex = (exportSizeIndex + 1) % EXPORT_SIZES.length;
                     init();
                 }).size(buttonWidth, buttonHeight).pos(col2X, row2Y).build());
@@ -232,6 +234,7 @@ public class GuiBatchExport extends Screen {
         this.visibleSettingsForEntities = forEntities;
         this.zoomManuallyAdjusted = false;
         this.backgroundManuallyAdjusted = false;
+        this.exportSizeManuallyAdjusted = false;
     }
 
     private int getExportSize() {
@@ -247,6 +250,13 @@ public class GuiBatchExport extends Screen {
     private Component getBackgroundButtonLabel() {
         return Component.translatable("gui.wikizoomer.background",
                 backgroundManuallyAdjusted ? getBackgroundLabel() : Component.translatable("gui.wikizoomer.configured"));
+    }
+
+    private Component getResolutionButtonLabel() {
+        Component value = exportSizeManuallyAdjusted
+                ? Component.literal(getExportSize() + "x" + getExportSize())
+                : Component.translatable("gui.wikizoomer.configured");
+        return Component.translatable("gui.wikizoomer.batch_resolution", value);
     }
 
     @OnlyIn(Dist.CLIENT)
