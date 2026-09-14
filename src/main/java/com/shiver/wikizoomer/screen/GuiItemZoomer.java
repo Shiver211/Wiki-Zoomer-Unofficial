@@ -15,12 +15,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-
 import java.util.Objects;
 
-@OnlyIn(Dist.CLIENT)
 public class GuiItemZoomer extends Screen {
 
     public static final Identifier GREENSCREEN = Objects.requireNonNull(Identifier.tryParse("wikizoomer:textures/gui/greenscreen.png"));

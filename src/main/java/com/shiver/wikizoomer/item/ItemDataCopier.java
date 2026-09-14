@@ -11,9 +11,6 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.component.TooltipDisplay;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
-
 import java.util.function.Consumer;
 
 public class ItemDataCopier extends Item {
@@ -26,7 +23,6 @@ public class ItemDataCopier extends Item {
         this(new Properties().stacksTo(1));
     }
 
-    @OnlyIn(Dist.CLIENT)
     @Override
     public void appendHoverText(ItemStack stack, TooltipContext context, TooltipDisplay display, Consumer<Component> tooltip, TooltipFlag flag) {
         tooltip.accept(Component.translatable("item.wikizoomer.data_copier.desc").withStyle(ChatFormatting.GRAY));

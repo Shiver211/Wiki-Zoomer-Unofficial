@@ -32,8 +32,6 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.joml.Matrix4fStack;
@@ -47,7 +45,6 @@ import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Queue;
 
-@OnlyIn(Dist.CLIENT)
 public class ExportManager {
     private static final Logger LOGGER = LogManager.getLogger();
     private static final int[] EXPORT_SIZES = new int[]{64, 128, 256, 512, 1024, 4096};

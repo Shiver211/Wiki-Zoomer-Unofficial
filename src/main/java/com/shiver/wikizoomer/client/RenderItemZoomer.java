@@ -16,11 +16,8 @@ import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 import org.jspecify.annotations.Nullable;
 
-@OnlyIn(Dist.CLIENT)
 public class RenderItemZoomer implements BlockEntityRenderer<TileEntityItemZoomer, RenderItemZoomer.ItemZoomerRenderState> {
     private final ItemModelResolver itemModelResolver;
 

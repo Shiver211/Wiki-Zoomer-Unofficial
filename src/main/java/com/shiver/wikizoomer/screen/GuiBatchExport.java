@@ -16,8 +16,6 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.ModList;
 
@@ -27,7 +25,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-@OnlyIn(Dist.CLIENT)
 public class GuiBatchExport extends Screen {
     private ModListWidget modList;
     private List<ModEntry> entries = new ArrayList<>();
@@ -264,7 +261,6 @@ public class GuiBatchExport extends Screen {
         return Component.translatable("gui.wikizoomer.batch_resolution", value);
     }
 
-    @OnlyIn(Dist.CLIENT)
     private class ModListWidget extends ObjectSelectionList<ModEntry> {
         public ModListWidget(Minecraft minecraft, int width, int height, int y, int itemHeight, List<ModEntry> entries) {
             super(minecraft, width, height, y, itemHeight);
@@ -279,7 +275,6 @@ public class GuiBatchExport extends Screen {
         }
     }
 
-    @OnlyIn(Dist.CLIENT)
     private class ModEntry extends ObjectSelectionList.Entry<ModEntry> {
         private final String modId;
         private final String modName;

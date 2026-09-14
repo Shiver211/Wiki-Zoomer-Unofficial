@@ -16,11 +16,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 import org.lwjgl.glfw.GLFW;
 
-@OnlyIn(Dist.CLIENT)
 public class GuiEntityZoomer extends Screen {
     private final TileEntityEntityZoomer zoomerBase;
     private ExportTask.Background background = ExportTask.Background.GREENSCREEN;
