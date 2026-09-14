@@ -1,5 +1,6 @@
 package com.shiver.wikizoomer.tileentity;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.NonNullList;
 import net.minecraft.nbt.CompoundTag;
@@ -13,13 +14,15 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BaseContainerBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 
 public abstract class TileEntityZoomerBase extends BaseContainerBlockEntity {
 
     private NonNullList<ItemStack> stacks = NonNullList.withSize(1, ItemStack.EMPTY);
     public int ticksExisted = 0;
 
-    protected TileEntityZoomerBase(BlockEntityType<?> type, net.minecraft.core.BlockPos pos, BlockState state) {
+    protected TileEntityZoomerBase(BlockEntityType<?> type, BlockPos pos, BlockState state) {
         super(type, pos, state);
     }
 
@@ -50,12 +53,14 @@ public abstract class TileEntityZoomerBase extends BaseContainerBlockEntity {
             if (this.stacks.get(index).getCount() <= count) {
                 itemstack = this.stacks.get(index);
                 this.stacks.set(index, ItemStack.EMPTY);
+                this.setChanged();
                 return itemstack;
             } else {
                 itemstack = this.stacks.get(index).split(count);
                 if (this.stacks.get(index).isEmpty()) {
                     this.stacks.set(index, ItemStack.EMPTY);
                 }
+                this.setChanged();
                 return itemstack;
             }
         } else {
@@ -82,24 +87,26 @@ public abstract class TileEntityZoomerBase extends BaseContainerBlockEntity {
         if (stack.getCount() > this.getMaxStackSize()) {
             stack.setCount(this.getMaxStackSize());
         }
-        HolderLookup.Provider registries = this.level != null ? this.level.registryAccess() : net.minecraft.core.RegistryAccess.EMPTY;
-        this.saveAdditional(this.getUpdateTag(registries), registries);
+        this.setChanged();
+        if (this.level != null && !this.level.isClientSide()) {
+            this.level.sendBlockUpdated(this.worldPosition, this.getBlockState(), this.getBlockState(), 3);
+        }
         if (index == 0 && !same) {
             this.requestModelDataUpdate();
         }
     }
 
     @Override
-    protected void loadAdditional(CompoundTag compound, HolderLookup.Provider registries) {
-        super.loadAdditional(compound, registries);
+    protected void loadAdditional(ValueInput input) {
+        super.loadAdditional(input);
         this.stacks = NonNullList.withSize(this.getContainerSize(), ItemStack.EMPTY);
-        ContainerHelper.loadAllItems(compound, this.stacks, registries);
+        ContainerHelper.loadAllItems(input, this.stacks);
     }
 
     @Override
-    protected void saveAdditional(CompoundTag compound, HolderLookup.Provider registries) {
-        super.saveAdditional(compound, registries);
-        ContainerHelper.saveAllItems(compound, this.stacks, registries);
+    protected void saveAdditional(ValueOutput output) {
+        super.saveAdditional(output);
+        ContainerHelper.saveAllItems(output, this.stacks);
     }
 
     @Override
@@ -134,6 +141,7 @@ public abstract class TileEntityZoomerBase extends BaseContainerBlockEntity {
     @Override
     public void clearContent() {
         stacks.clear();
+        this.setChanged();
     }
 
     @Override
@@ -144,5 +152,10 @@ public abstract class TileEntityZoomerBase extends BaseContainerBlockEntity {
     @Override
     public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
         return this.saveWithoutMetadata(registries);
+    }
+
+    @Override
+    protected Component getDefaultName() {
+        return Component.translatable("block.wikizoomer.zoomer");
     }
 }

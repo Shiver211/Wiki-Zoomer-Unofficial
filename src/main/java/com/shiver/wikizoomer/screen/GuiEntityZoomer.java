@@ -1,35 +1,24 @@
 package com.shiver.wikizoomer.screen;
 
-import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.*;
-import com.mojang.math.Axis;
-import com.shiver.wikizoomer.WikiZoomerUnofficialClient;
+import com.mojang.blaze3d.textures.FilterMode;
 import com.shiver.wikizoomer.client.ExportManager;
 import com.shiver.wikizoomer.client.ExportTask;
 import com.shiver.wikizoomer.tileentity.TileEntityEntityZoomer;
-import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
-import net.minecraft.client.renderer.texture.AbstractTexture;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.item.ItemStack;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
-import org.joml.Quaternionf;
-import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFW;
-
-import java.lang.reflect.Field;
 
 @OnlyIn(Dist.CLIENT)
 public class GuiEntityZoomer extends Screen {
@@ -116,7 +105,7 @@ public class GuiEntityZoomer extends Screen {
         this.addRenderableWidget(Button.builder(
                 Component.translatable("gui.wikizoomer.batch_export"), (button) -> {
                     ExportManager.rememberEntitySettings(sliderValue, background, getExportSize(), rotX, rotY, offsetX, offsetY);
-                    Minecraft.getInstance().setScreen(new GuiBatchExport());
+                    Minecraft.getInstance().gui.setScreen(new GuiBatchExport());
                 }).size(buttonWidth, buttonHeight).pos(col2X, row2Y).build());
 
         this.addRenderableWidget(Button.builder(
@@ -127,37 +116,27 @@ public class GuiEntityZoomer extends Screen {
 
         this.addRenderableWidget(Button.builder(
                 Component.translatable("gui.wikizoomer.close"), (button) -> {
-                    Minecraft.getInstance().setScreen(null);
+                    Minecraft.getInstance().gui.setScreen(null);
                 }).size(buttonWidth, buttonHeight).pos(col3X, row2Y).build());
     }
 
     @Override
-    public void renderBackground(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-        this.renderMenuBackground(guiGraphics);
+    public void extractBackground(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
+        if (background == ExportTask.Background.GREENSCREEN) {
+            guiGraphics.fill(0, 0, this.width, this.height, 0xFF4CFF00);
+        } else {
+            this.extractMenuBackground(guiGraphics);
+        }
     }
 
     @Override
-    public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
-        if (getMinecraft() != null) {
-            try {
-                if (background == ExportTask.Background.GREENSCREEN) {
-                    guiGraphics.fill(0, 0, this.width, this.height, 0xFF4CFF00);
-                } else {
-                    this.renderBackground(guiGraphics, mouseX, mouseY, partialTicks);
-                }
-            } catch (Exception e) {
-                // ignore
-            }
-        }
+    public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTicks) {
         renderFocus(guiGraphics);
         renderCropFrame(guiGraphics);
-        guiGraphics.pose().pushPose();
-        guiGraphics.pose().translate(0, 0, 5000F);
-        super.render(guiGraphics, mouseX, mouseY, partialTicks);
-        guiGraphics.pose().popPose();
+        super.extractRenderState(guiGraphics, mouseX, mouseY, partialTicks);
     }
 
-    private void renderCropFrame(GuiGraphics guiGraphics) {
+    private void renderCropFrame(GuiGraphicsExtractor guiGraphics) {
         int size = getPreviewSize();
         int left = (this.width - size) / 2;
         int top = getPreviewTop(size);
@@ -175,36 +154,21 @@ public class GuiEntityZoomer extends Screen {
         return Math.max(8, (this.height - previewSize) / 2);
     }
 
-    private void renderFocus(GuiGraphics guiGraphics) {
-        guiGraphics.pose().pushPose();
-        guiGraphics.pose().translate(0, 0, 1000F);
-        guiGraphics.pose().scale(1.0F, 1.0F, 1.0F);
+    private void renderFocus(GuiGraphicsExtractor guiGraphics) {
         Entity renderEntity = zoomerBase.getCachedEntity();
-        float scale = prevSliderValue + (sliderValue - prevSliderValue) * Minecraft.getInstance().getTimer().getGameTimeDeltaPartialTick(true);
         if (renderEntity != null) {
-            float f1 = Math.max(renderEntity.getBbWidth(), renderEntity.getBbHeight());
-            int i = this.width / 2;
-            int j = (this.height + (int) ((scale / 100F) * (renderEntity.getBbHeight() * 100F))) / 2;
-
-            boolean isMimic = false;
-            if (WikiZoomerUnofficialClient.dataMimic != null) {
-                if (renderEntity.getType() == WikiZoomerUnofficialClient.dataMimic.getType()) {
-                    renderEntity = WikiZoomerUnofficialClient.dataMimic;
-                    isMimic = true;
-                }
-            }
-            if (renderEntity instanceof LivingEntity) {
-                int previewSize = getPreviewSize();
-                float previewScale = previewSize / (float) getExportSize();
-                int frameLeft = (this.width - previewSize) / 2;
-                int frameTop = getPreviewTop(previewSize);
-                float centerX = frameLeft + previewSize / 2.0F + offsetX * previewScale;
-                float centerY = frameTop + (previewSize + ((scale / 100F) * (renderEntity.getBbHeight() * 100F) * previewScale)) / 2.0F + offsetY * previewScale;
-                guiGraphics.pose().translate(centerX, centerY, 10F);
-                drawEntityOnScreen(guiGraphics, 0, 0, scale * previewScale, false, rotX, rotY, 0, 0, 0, renderEntity, isMimic);
+            int previewSize = getPreviewSize();
+            int left = (this.width - previewSize) / 2;
+            int top = getPreviewTop(previewSize);
+            int targetSize = getExportSize();
+            ExportManager.renderPreviewToTarget(Minecraft.getInstance(), ExportTask.Type.ENTITY, ItemStack.EMPTY, renderEntity,
+                    sliderValue, background, targetSize, rotX, rotY, offsetX, offsetY);
+            if (ExportManager.renderTarget != null && ExportManager.renderTarget.getColorTextureView() != null) {
+                guiGraphics.blit(ExportManager.renderTarget.getColorTextureView(),
+                        RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST),
+                        left, top, left + previewSize, top + previewSize, 0.0F, 1.0F, 0.0F, 1.0F);
             }
         }
-        guiGraphics.pose().popPose();
         prevSliderValue = sliderValue;
     }
 
@@ -232,85 +196,6 @@ public class GuiEntityZoomer extends Screen {
     public void removed() {
         rememberCurrentSettings();
         super.removed();
-    }
-
-    public static void drawEntityOnScreen(GuiGraphics guiGraphics, int posX, int posY, float scale, boolean follow,
-                                          double xRot, double yRot, double zRot, float mouseX, float mouseY,
-                                          Entity entity, boolean isMimic) {
-        guiGraphics.pose().pushPose();
-        guiGraphics.pose().mulPose(Axis.ZP.rotationDegrees(180.0F));
-        guiGraphics.pose().scale(scale, scale, scale);
-        entity.setOnGround(false);
-
-        Quaternionf quaternion1 = Axis.XP.rotationDegrees((float) xRot);
-        Quaternionf quaternion2 = Axis.YP.rotationDegrees((float) yRot);
-        Quaternionf quaternion = Axis.ZP.rotationDegrees((float) zRot);
-        quaternion.mul(quaternion1);
-
-        float halfHeight = entity.getBbHeight() / 2.0F;
-        guiGraphics.pose().translate(0.0F, halfHeight, 0.0F);
-        guiGraphics.pose().mulPose(quaternion);
-        guiGraphics.pose().mulPose(quaternion2);
-        guiGraphics.pose().translate(0.0F, -halfHeight, 0.0F);
-
-        Vector3f light0 = new Vector3f(-0.2F, 0.0F, 1.0F).normalize();
-        Vector3f light1 = new Vector3f(-0.2F, -1.0F, 0.0F).normalize();
-        RenderSystem.setShaderLights(light0, light1);
-
-        EntityRenderDispatcher entityRenderDispatcher = Minecraft.getInstance().getEntityRenderDispatcher();
-        quaternion1.conjugate();
-        entityRenderDispatcher.overrideCameraOrientation(quaternion1);
-        entityRenderDispatcher.setRenderShadow(false);
-        MultiBufferSource.BufferSource bufferSource = Minecraft.getInstance().renderBuffers().bufferSource();
-
-        if (!isMimic) {
-            entity.setYRot(0.0F);
-            entity.setXRot(0.0F);
-            if (entity instanceof LivingEntity livingEntity) {
-                livingEntity.yBodyRot = 0.0F;
-                livingEntity.yHeadRotO = 0.0F;
-                livingEntity.yHeadRot = 0.0F;
-            }
-            entity.setOldPosAndRot();
-        }
-
-        AbstractTexture entityTex = null;
-        boolean origBlur = false;
-        boolean origMipmap = false;
-        try {
-            ResourceLocation texLoc = entityRenderDispatcher.getRenderer(entity).getTextureLocation(entity);
-            entityTex = Minecraft.getInstance().getTextureManager().getTexture(texLoc);
-            if (entityTex != null) {
-                Field blurField = AbstractTexture.class.getDeclaredField("blur");
-                Field mipmapField = AbstractTexture.class.getDeclaredField("mipmap");
-                blurField.setAccessible(true);
-                mipmapField.setAccessible(true);
-                origBlur = blurField.getBoolean(entityTex);
-                origMipmap = mipmapField.getBoolean(entityTex);
-                blurField.setBoolean(entityTex, false);
-                mipmapField.setBoolean(entityTex, false);
-                entityTex.setFilter(false, false);
-            }
-        } catch (Exception ignored) {}
-
-        entityRenderDispatcher.render(entity, 0.0D, 0.0D, 0.0D, 0.0F, Minecraft.getInstance().getTimer().getGameTimeDeltaPartialTick(true), guiGraphics.pose(), bufferSource, 15728880);
-        bufferSource.endBatch();
-
-        if (entityTex != null) {
-            try {
-                Field blurField = AbstractTexture.class.getDeclaredField("blur");
-                Field mipmapField = AbstractTexture.class.getDeclaredField("mipmap");
-                blurField.setAccessible(true);
-                mipmapField.setAccessible(true);
-                blurField.setBoolean(entityTex, origBlur);
-                mipmapField.setBoolean(entityTex, origMipmap);
-                entityTex.setFilter(origBlur, origMipmap);
-            } catch (Exception ignored) {}
-        }
-        guiGraphics.flush();
-        entityRenderDispatcher.setRenderShadow(true);
-        guiGraphics.pose().popPose();
-        Lighting.setupFor3DItems();
     }
 
     @Override
@@ -343,13 +228,13 @@ public class GuiEntityZoomer extends Screen {
     }
 
     @Override
-    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
-        if (super.mouseDragged(mouseX, mouseY, button, dragX, dragY)) {
+    public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        if (super.mouseDragged(event, dragX, dragY)) {
             return true;
         }
-        if (button == 0) {
-            rotY -= (float) dragX;
-            rotX += (float) dragY;
+        if (event.button() == 0) {
+            rotY += (float) dragX;
+            rotX -= (float) dragY;
             return true;
         }
         return false;
@@ -369,24 +254,24 @@ public class GuiEntityZoomer extends Screen {
     }
 
     @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        if (super.keyPressed(keyCode, scanCode, modifiers)) {
+    public boolean keyPressed(KeyEvent event) {
+        if (super.keyPressed(event)) {
             return true;
         }
-        float step = Screen.hasShiftDown() ? 1.0F : 5.0F;
-        if (keyCode == GLFW.GLFW_KEY_A) {
+        float step = event.hasShiftDown() ? 1.0F : 5.0F;
+        if (event.key() == GLFW.GLFW_KEY_A) {
             offsetX -= step;
             return true;
         }
-        if (keyCode == GLFW.GLFW_KEY_D) {
+        if (event.key() == GLFW.GLFW_KEY_D) {
             offsetX += step;
             return true;
         }
-        if (keyCode == GLFW.GLFW_KEY_W) {
+        if (event.key() == GLFW.GLFW_KEY_W) {
             offsetY -= step;
             return true;
         }
-        if (keyCode == GLFW.GLFW_KEY_S) {
+        if (event.key() == GLFW.GLFW_KEY_S) {
             offsetY += step;
             return true;
         }

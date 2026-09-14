@@ -3,14 +3,15 @@ package com.shiver.wikizoomer.screen;
 import com.shiver.wikizoomer.client.ExportManager;
 import com.shiver.wikizoomer.client.ExportTask;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -117,15 +118,19 @@ public class GuiBatchExport extends Screen {
 
         this.addRenderableWidget(Button.builder(
                 Component.translatable("gui.wikizoomer.close"), (button) -> {
-                    Minecraft.getInstance().setScreen(null);
+                    Minecraft.getInstance().gui.setScreen(null);
                 }).size(buttonWidth, buttonHeight).pos(col3X, row3Y).build());
     }
 
     @Override
-    public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
-        this.renderBackground(guiGraphics, mouseX, mouseY, partialTicks);
-        super.render(guiGraphics, mouseX, mouseY, partialTicks);
-        guiGraphics.drawCenteredString(this.font, Component.translatable("gui.wikizoomer.batch_title"), this.width / 2, 12, 0xFFFFFF);
+    public void extractBackground(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTick) {
+        this.extractMenuBackground(guiGraphics);
+    }
+
+    @Override
+    public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTicks) {
+        super.extractRenderState(guiGraphics, mouseX, mouseY, partialTicks);
+        guiGraphics.centeredText(this.font, Component.translatable("gui.wikizoomer.batch_title"), this.width / 2, 12, 0xFFFFFF);
     }
 
     private void startExport() {
@@ -152,7 +157,7 @@ public class GuiBatchExport extends Screen {
         if (exportItems) {
             for (Item item : BuiltInRegistries.ITEM) {
                 if (item == Items.AIR) continue;
-                ResourceLocation id = BuiltInRegistries.ITEM.getKey(item);
+                Identifier id = BuiltInRegistries.ITEM.getKey(item);
                 if (id == null || !modIds.contains(id.getNamespace())) continue;
                 ExportTask task = ExportManager.createItemTask(new ItemStack(item), itemSettings.zoomPercent, itemSettings.background,
                         itemSettings.exportSize, true, itemSettings.rotX, itemSettings.rotY);
@@ -161,7 +166,7 @@ public class GuiBatchExport extends Screen {
         }
         if (exportEntities) {
             for (EntityType<?> entityType : BuiltInRegistries.ENTITY_TYPE) {
-                ResourceLocation id = BuiltInRegistries.ENTITY_TYPE.getKey(entityType);
+                Identifier id = BuiltInRegistries.ENTITY_TYPE.getKey(entityType);
                 if (id == null || !modIds.contains(id.getNamespace())) continue;
                 ExportTask task = ExportManager.createEntityIdTask(id, entitySettings.zoomPercent, entitySettings.background,
                         entitySettings.exportSize, true, entitySettings.rotX, entitySettings.rotY,
@@ -174,7 +179,7 @@ public class GuiBatchExport extends Screen {
             return;
         }
         ExportManager.enqueueBatch(tasks);
-        Minecraft.getInstance().setScreen(null);
+        Minecraft.getInstance().gui.setScreen(null);
     }
 
     private Set<String> getSelectedModIds() {
@@ -272,11 +277,6 @@ public class GuiBatchExport extends Screen {
         public int getRowWidth() {
             return Math.min(260, this.width - 20);
         }
-
-        @Override
-        protected int getScrollbarPosition() {
-            return this.getRowLeft() + this.getRowWidth();
-        }
     }
 
     @OnlyIn(Dist.CLIENT)
@@ -291,16 +291,19 @@ public class GuiBatchExport extends Screen {
         }
 
         @Override
-        public void render(GuiGraphics guiGraphics, int index, int y, int x, int entryWidth, int entryHeight, int mouseX, int mouseY, boolean hovered, float partialTicks) {
+        public void extractContent(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, boolean hovered, float partialTicks) {
             int color = selected ? 0x00FF00 : 0xFFFFFF;
             String label = (selected ? "[x] " : "[ ] ") + modName + " (" + modId + ")";
-            guiGraphics.drawString(Minecraft.getInstance().font, label, x + 2, y + 2, color);
+            guiGraphics.text(Minecraft.getInstance().font, label, this.getContentX() + 2, this.getContentY() + 2, color);
         }
 
         @Override
-        public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            selected = !selected;
-            return true;
+        public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+            if (event.button() == 0) {
+                selected = !selected;
+                return true;
+            }
+            return false;
         }
 
         @Override

@@ -5,6 +5,8 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.EntityType;
@@ -14,15 +16,21 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.item.component.TooltipDisplay;
+import net.minecraft.world.level.storage.TagValueOutput;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 public class ItemEntityBinder extends Item {
 
+    public ItemEntityBinder(Properties properties) {
+        super(properties);
+    }
+
     public ItemEntityBinder() {
-        super(new Properties().stacksTo(1));
+        this(new Properties().stacksTo(1));
     }
 
     @Override
@@ -30,22 +38,29 @@ public class ItemEntityBinder extends Item {
         return isEntityBound(stack);
     }
 
-    @Override
-    public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
-        if (!isEntityBound(stack)) {
-            tooltip.add(Component.translatable("item.wikizoomer.entity_binder.desc").withStyle(ChatFormatting.GRAY));
-        }
-        Boolean isPlayer = stack.get(ModDataComponents.IS_PLAYER_ENTITY);
+    public static Optional<EntityType<?>> getEntityType(ItemStack stack) {
         CompoundTag entityTag = stack.get(ModDataComponents.ENTITY_TAG);
         if (entityTag != null) {
-            boolean isPlayerEntity = isPlayer != null && isPlayer;
-            Optional<EntityType<?>> optional = EntityType.by(entityTag);
-            if (optional.isPresent()) {
-                Component untranslated = isPlayerEntity
-                        ? Component.translatable("entity.player.name").withStyle(ChatFormatting.GRAY)
-                        : optional.get().getDescription();
-                tooltip.add(untranslated);
+            String idStr = entityTag.getStringOr("id", "");
+            Identifier id = Identifier.tryParse(idStr);
+            if (id != null) {
+                return BuiltInRegistries.ENTITY_TYPE.getOptional(id);
             }
+        }
+        return Optional.empty();
+    }
+
+    @Override
+    public void appendHoverText(ItemStack stack, TooltipContext context, TooltipDisplay display, Consumer<Component> tooltip, TooltipFlag flag) {
+        if (!isEntityBound(stack)) {
+            tooltip.accept(Component.translatable("item.wikizoomer.entity_binder.desc").withStyle(ChatFormatting.GRAY));
+        }
+        Boolean isPlayer = stack.get(ModDataComponents.IS_PLAYER_ENTITY);
+        boolean isPlayerEntity = isPlayer != null && isPlayer;
+        if (isPlayerEntity) {
+            tooltip.accept(Component.translatable("entity.player.name").withStyle(ChatFormatting.GRAY));
+        } else {
+            getEntityType(stack).ifPresent(type -> tooltip.accept(type.getDescription()));
         }
     }
 
@@ -54,18 +69,15 @@ public class ItemEntityBinder extends Item {
         if (isPlayer != null && isPlayer) {
             return true;
         }
-        CompoundTag entityTag = stack.get(ModDataComponents.ENTITY_TAG);
-        if (entityTag != null) {
-            Optional<EntityType<?>> optional = EntityType.by(entityTag);
-            return optional.isPresent();
-        }
-        return false;
+        return getEntityType(stack).isPresent();
     }
 
     @Override
     @NotNull
     public InteractionResult interactLivingEntity(@NotNull ItemStack stack, Player player, LivingEntity target, @NotNull InteractionHand hand) {
-        CompoundTag entityTag = target.saveWithoutId(new CompoundTag());
+        TagValueOutput output = TagValueOutput.createWithContext(ProblemReporter.DISCARDING, target.registryAccess());
+        target.saveWithoutId(output);
+        CompoundTag entityTag = output.buildResult();
         entityTag.putString("id", BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString());
 
         ItemStack stackReplacement = new ItemStack(this);

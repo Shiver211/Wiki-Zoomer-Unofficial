@@ -7,18 +7,15 @@ import com.shiver.wikizoomer.screen.GuiItemZoomer;
 import com.shiver.wikizoomer.tileentity.TileEntityEntityZoomer;
 import com.shiver.wikizoomer.tileentity.TileEntityItemZoomer;
 import com.shiver.wikizoomer.tileentity.TileEntityZoomerBase;
-import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Containers;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseEntityBlock;
@@ -34,11 +31,8 @@ import net.minecraft.world.phys.shapes.BooleanOp;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.api.distmarker.OnlyIn;
 
 import javax.annotation.Nullable;
-import java.util.List;
 
 public class BlockZoomer extends BaseEntityBlock {
     private static final VoxelShape BASE_SHAPE = Block.box(0, 0, 0, 16, 5, 16);
@@ -61,15 +55,8 @@ public class BlockZoomer extends BaseEntityBlock {
     }
 
     @Override
-    protected void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
-        if (!state.is(newState.getBlock())) {
-            BlockEntity blockEntity = level.getBlockEntity(pos);
-            if (blockEntity instanceof TileEntityZoomerBase zoomer) {
-                Containers.dropContents(level, pos, zoomer);
-                level.updateNeighbourForOutputSignal(pos, this);
-            }
-        }
-        super.onRemove(state, level, pos, newState, isMoving);
+    protected void affectNeighborsAfterRemoval(BlockState state, ServerLevel level, BlockPos pos, boolean movedByPiston) {
+        Containers.updateNeighboursAfterDestroy(state, level, pos);
     }
 
     @Override
@@ -83,6 +70,29 @@ public class BlockZoomer extends BaseEntityBlock {
     }
 
     @Override
+    protected InteractionResult useItemOn(ItemStack itemStack, BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hitResult) {
+        if (player.isShiftKeyDown()) {
+            return useWithoutItem(state, level, pos, player, hitResult);
+        }
+        if (level.getBlockEntity(pos) instanceof TileEntityZoomerBase zoomer) {
+            if (!itemStack.isEmpty() && (itemOrEntity || itemStack.getItem() == WikiZoomerUnofficial.ENTITY_BINDER_ITEM.get())) {
+                if (!zoomer.getItem(0).isEmpty()) {
+                    ItemEntity dropped = new ItemEntity(level, pos.getX() + 0.5D, pos.getY() + 1.0D, pos.getZ() + 0.5D, zoomer.getItem(0).copy());
+                    level.addFreshEntity(dropped);
+                    zoomer.clearContent();
+                }
+                ItemStack single = itemStack.copyWithCount(1);
+                zoomer.setItem(0, single);
+                if (!player.isCreative()) {
+                    itemStack.shrink(1);
+                }
+                return InteractionResult.SUCCESS;
+            }
+        }
+        return useWithoutItem(state, level, pos, player, hitResult);
+    }
+
+    @Override
     protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
         if (!player.isShiftKeyDown()) {
             if (level.getBlockEntity(pos) instanceof TileEntityZoomerBase zoomer) {
@@ -92,9 +102,9 @@ public class BlockZoomer extends BaseEntityBlock {
                     zoomer.clearContent();
                 }
                 InteractionHand handIn = player.getUsedItemHand();
+                if (handIn == null) handIn = InteractionHand.MAIN_HAND;
                 ItemStack heldItem = player.getItemInHand(handIn);
-                ItemStack single = heldItem.copy();
-                single.setCount(1);
+                ItemStack single = heldItem.copyWithCount(1);
                 if (itemOrEntity || single.getItem() == WikiZoomerUnofficial.ENTITY_BINDER_ITEM.get()) {
                     zoomer.setItem(0, single);
                     if (!player.isCreative())
@@ -103,28 +113,16 @@ public class BlockZoomer extends BaseEntityBlock {
                 return InteractionResult.SUCCESS;
             }
         } else {
-            if (level.isClientSide) {
+            if (level.isClientSide()) {
                 if (itemOrEntity) {
-                    Minecraft.getInstance().setScreen(new GuiItemZoomer((TileEntityZoomerBase) level.getBlockEntity(pos)));
+                    Minecraft.getInstance().gui.setScreen(new GuiItemZoomer((TileEntityZoomerBase) level.getBlockEntity(pos)));
                 } else {
-                    Minecraft.getInstance().setScreen(new GuiEntityZoomer((TileEntityEntityZoomer) level.getBlockEntity(pos)));
+                    Minecraft.getInstance().gui.setScreen(new GuiEntityZoomer((TileEntityEntityZoomer) level.getBlockEntity(pos)));
                 }
             }
             return InteractionResult.SUCCESS;
         }
         return InteractionResult.SUCCESS;
-    }
-
-    @OnlyIn(Dist.CLIENT)
-    @Override
-    public void appendHoverText(ItemStack stack, Item.TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
-        if (itemOrEntity) {
-            tooltip.add(Component.translatable("block.wikizoomer.item_zoomer.desc0").withStyle(ChatFormatting.GRAY));
-            tooltip.add(Component.translatable("block.wikizoomer.item_zoomer.desc1").withStyle(ChatFormatting.GRAY));
-        } else {
-            tooltip.add(Component.translatable("block.wikizoomer.entity_zoomer.desc0").withStyle(ChatFormatting.GRAY));
-            tooltip.add(Component.translatable("block.wikizoomer.entity_zoomer.desc1").withStyle(ChatFormatting.GRAY));
-        }
     }
 
     @Nullable

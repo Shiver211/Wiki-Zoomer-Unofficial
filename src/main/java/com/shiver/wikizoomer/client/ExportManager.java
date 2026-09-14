@@ -1,22 +1,33 @@
 package com.shiver.wikizoomer.client;
 
-import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.mojang.blaze3d.GpuFormat;
+import com.mojang.blaze3d.ProjectionType;
+import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.pipeline.TextureTarget;
 import com.mojang.blaze3d.platform.Lighting;
+import com.mojang.blaze3d.platform.NativeImage;
+import com.mojang.blaze3d.systems.GpuDevice;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.VertexSorting;
 import com.mojang.math.Axis;
 import com.shiver.wikizoomer.WikiZoomerUnofficialClient;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.Projection;
+import net.minecraft.client.renderer.ProjectionMatrixBuffer;
+import net.minecraft.client.renderer.SubmitNodeStorage;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
+import net.minecraft.client.renderer.entity.state.EntityRenderState;
+import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
+import net.minecraft.client.renderer.item.TrackingItemStackRenderState;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
-import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemDisplayContext;
@@ -25,17 +36,13 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.joml.Matrix4f;
+import org.joml.Matrix4fStack;
 import org.joml.Quaternionf;
-import org.joml.Vector3f;
-import org.lwjgl.BufferUtils;
-import org.lwjgl.opengl.GL11;
-import org.lwjgl.opengl.GL12;
+import org.joml.Vector4f;
+import org.joml.Vector4fc;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
 import java.io.File;
-import java.nio.IntBuffer;
+import java.lang.reflect.Field;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Queue;
@@ -49,12 +56,11 @@ public class ExportManager {
     private static final Queue<ExportTask> QUEUE = new ArrayDeque<>();
     private static final ExportSettings LAST_ITEM_SETTINGS = new ExportSettings(DEFAULT_ZOOM, ExportTask.Background.GREENSCREEN, DEFAULT_EXPORT_SIZE, 0.0F, 0.0F, 0.0F, 0.0F);
     private static final ExportSettings LAST_ENTITY_SETTINGS = new ExportSettings(DEFAULT_ZOOM, ExportTask.Background.GREENSCREEN, DEFAULT_EXPORT_SIZE, 30.0F, 45.0F, 0.0F, 0.0F);
-    private static RenderTarget renderTarget;
+    public static TextureTarget renderTarget;
     private static int renderTargetSize = -1;
     private static boolean renderQueued = false;
     private static int batchRemaining = 0;
-    private static IntBuffer pixelBuffer;
-    private static int[] pixelValues;
+    private static FeatureRenderDispatcher cachedDispatcher;
 
     public static int[] getExportSizes() {
         return EXPORT_SIZES.clone();
@@ -113,7 +119,7 @@ public class ExportManager {
         if (stack == null || stack.isEmpty()) {
             return null;
         }
-        ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
         if (id == null) {
             return null;
         }
@@ -126,7 +132,7 @@ public class ExportManager {
         if (entity == null) {
             return null;
         }
-        ResourceLocation id = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+        Identifier id = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
         if (id == null) {
             return null;
         }
@@ -134,7 +140,7 @@ public class ExportManager {
         return ExportTask.forEntity(entity, output, background, isBatch, zoomPercent, exportSize, rotX, rotY, offsetX, offsetY);
     }
 
-    public static ExportTask createEntityIdTask(ResourceLocation entityId, float zoomPercent, ExportTask.Background background,
+    public static ExportTask createEntityIdTask(Identifier entityId, float zoomPercent, ExportTask.Background background,
                                                 int exportSize, boolean isBatch, float rotX, float rotY, float offsetX, float offsetY) {
         if (entityId == null) {
             return null;
@@ -159,7 +165,7 @@ public class ExportManager {
         if (RenderSystem.isOnRenderThread()) {
             executeTask(mc, task);
         } else {
-            RenderSystem.recordRenderCall(() -> executeTask(mc, task));
+            mc.execute(() -> executeTask(mc, task));
         }
     }
 
@@ -184,11 +190,120 @@ public class ExportManager {
         }
     }
 
-    private static File getOutputFile(ResourceLocation id) {
+    private static File getOutputFile(Identifier id) {
         Minecraft mc = Minecraft.getInstance();
         File baseDir = new File(mc.gameDirectory, "wiki zoomer");
         File modDir = new File(baseDir, id.getNamespace());
         return new File(modDir, id.getPath() + ".png");
+    }
+
+    private static FeatureRenderDispatcher getFeatureRenderDispatcher() {
+        if (cachedDispatcher != null) return cachedDispatcher;
+        try {
+            Field f = net.minecraft.client.renderer.GameRenderer.class.getDeclaredField("featureRenderDispatcher");
+            f.setAccessible(true);
+            cachedDispatcher = (FeatureRenderDispatcher) f.get(Minecraft.getInstance().gameRenderer);
+            return cachedDispatcher;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to get FeatureRenderDispatcher", e);
+        }
+    }
+
+    public static void renderPreviewToTarget(Minecraft mc, ExportTask.Type type, ItemStack itemStack, Entity entity,
+                                             float zoomPercent, ExportTask.Background background, int exportSize,
+                                             float rotX, float rotY, float offsetX, float offsetY) {
+        if (type == ExportTask.Type.ITEM && (itemStack == null || itemStack.isEmpty())) {
+            return;
+        }
+        if (type == ExportTask.Type.ENTITY && entity == null) {
+            return;
+        }
+
+        ensureRenderTarget(exportSize);
+
+        boolean transparent = background == ExportTask.Background.TRANSPARENT;
+        GpuDevice device = RenderSystem.getDevice();
+        Vector4fc clearColor = transparent ? new Vector4f(0.0F, 0.0F, 0.0F, 0.0F) : new Vector4f(0.298F, 1.0F, 0.0F, 1.0F);
+        device.createCommandEncoder().clearColorAndDepthTextures(renderTarget.getColorTexture(), clearColor, renderTarget.getDepthTexture(), 0.0);
+
+        Projection projection = new Projection();
+        projection.setupOrtho(-1000.0F, 1000.0F, exportSize, exportSize, true);
+        ProjectionMatrixBuffer projectionBuffer = new ProjectionMatrixBuffer("wikizoomer_preview");
+        RenderSystem.setProjectionMatrix(projectionBuffer.getBuffer(projection), ProjectionType.ORTHOGRAPHIC);
+
+        RenderSystem.outputColorTextureOverride = renderTarget.getColorTextureView();
+        RenderSystem.outputDepthTextureOverride = renderTarget.getDepthTextureView();
+
+        Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
+        modelViewStack.pushMatrix();
+
+        SubmitNodeStorage submitNodeStorage = new SubmitNodeStorage();
+        PoseStack poseStack = new PoseStack();
+
+        if (type == ExportTask.Type.ITEM) {
+            TrackingItemStackRenderState itemState = new TrackingItemStackRenderState();
+            mc.getItemModelResolver().updateForTopItem(itemState, itemStack, ItemDisplayContext.GUI, mc.level, null, 0);
+            boolean flat = !itemState.usesBlockLight();
+            if (flat) {
+                mc.gameRenderer.lighting().setupFor(Lighting.Entry.ITEMS_FLAT);
+            } else {
+                mc.gameRenderer.lighting().setupFor(Lighting.Entry.ITEMS_3D);
+            }
+
+            poseStack.pushPose();
+            poseStack.translate(exportSize / 2.0F, exportSize / 2.0F, 0.0F);
+            float scale = zoomPercent * 1.92F;
+            poseStack.scale(scale, -scale, -scale);
+            poseStack.mulPose(Axis.XP.rotationDegrees(rotX));
+            poseStack.mulPose(Axis.YP.rotationDegrees(rotY));
+            itemState.submit(poseStack, submitNodeStorage, 15728880, OverlayTexture.NO_OVERLAY, 0);
+            poseStack.popPose();
+        } else {
+            mc.gameRenderer.lighting().setupFor(Lighting.Entry.ENTITY_IN_UI);
+            EntityRenderDispatcher dispatcher = mc.getEntityRenderDispatcher();
+            Entity renderEntity = entity;
+            if (WikiZoomerUnofficialClient.dataMimic != null && renderEntity.getType() == WikiZoomerUnofficialClient.dataMimic.getType()) {
+                renderEntity = WikiZoomerUnofficialClient.dataMimic;
+            } else {
+                renderEntity.setYRot(0.0F);
+                renderEntity.setXRot(0.0F);
+                if (renderEntity instanceof LivingEntity livingEntity) {
+                    livingEntity.yBodyRot = 0.0F;
+                    livingEntity.yHeadRotO = 0.0F;
+                    livingEntity.yHeadRot = 0.0F;
+                }
+                renderEntity.setOldPosAndRot();
+            }
+
+            EntityRenderState renderState = dispatcher.extractEntity(renderEntity, 1.0F);
+            renderState.lightCoords = 15728880;
+
+            poseStack.pushPose();
+            float centerX = exportSize / 2.0F + offsetX;
+            float centerY = (exportSize + ((zoomPercent / 100.0F) * (renderEntity.getBbHeight() * 100.0F))) / 2.0F + offsetY;
+            poseStack.translate(centerX, centerY, 0.0F);
+            poseStack.scale(zoomPercent, zoomPercent, -zoomPercent);
+            poseStack.mulPose(Axis.ZP.rotationDegrees(180.0F));
+            float halfHeight = renderEntity.getBbHeight() / 2.0F;
+            poseStack.translate(0.0F, halfHeight, 0.0F);
+            poseStack.mulPose(Axis.XP.rotationDegrees(rotX));
+            poseStack.mulPose(Axis.YP.rotationDegrees(rotY));
+            poseStack.translate(0.0F, -halfHeight, 0.0F);
+
+            Quaternionf cameraAngle = Axis.XP.rotationDegrees(rotX);
+            CameraRenderState cameraRenderState = new CameraRenderState();
+            cameraRenderState.orientation = cameraAngle.conjugate(new Quaternionf()).rotateY((float) Math.PI);
+
+            dispatcher.submit(renderState, cameraRenderState, 0.0, 0.0, 0.0, poseStack, submitNodeStorage);
+            poseStack.popPose();
+        }
+
+        getFeatureRenderDispatcher().renderAllFeatures(submitNodeStorage);
+        modelViewStack.popMatrix();
+
+        RenderSystem.outputColorTextureOverride = null;
+        RenderSystem.outputDepthTextureOverride = null;
+        projectionBuffer.close();
     }
 
     private static boolean renderTask(Minecraft mc, ExportTask task) {
@@ -204,56 +319,48 @@ public class ExportManager {
             }
         }
 
-        ensureRenderTarget(task.exportSize);
-
         File output = task.outputFile;
         File parent = output.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
             LOGGER.warn("Could not create export directory: {}", parent.getAbsolutePath());
         }
 
-        RenderTarget previous = mc.getMainRenderTarget();
+        renderPreviewToTarget(mc, task.type, task.itemStack, entity, task.zoomPercent, task.background,
+                task.exportSize, task.rotX, task.rotY, task.offsetX, task.offsetY);
+
         boolean transparent = task.background == ExportTask.Background.TRANSPARENT;
-        renderTarget.setClearColor(transparent ? 0.0F : 0.298F, transparent ? 0.0F : 1.0F, 0.0F, transparent ? 0.0F : 1.0F);
-        renderTarget.clear(Minecraft.ON_OSX);
-        renderTarget.bindWrite(true);
+        GpuDevice device = RenderSystem.getDevice();
 
-        RenderSystem.viewport(0, 0, task.exportSize, task.exportSize);
-        RenderSystem.clear(GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT, Minecraft.ON_OSX);
-        RenderSystem.disableCull();
-        RenderSystem.enableDepthTest();
-
-        Matrix4f previousProjection = RenderSystem.getProjectionMatrix();
-        RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0.0F, task.exportSize, task.exportSize, 0.0F, 1000.0F, 3000.0F), VertexSorting.ORTHOGRAPHIC_Z);
-
-        PoseStack poseStack = new PoseStack();
-        MultiBufferSource.BufferSource bufferSource = mc.renderBuffers().bufferSource();
-
-        poseStack.pushPose();
-        poseStack.translate(0.0F, 0.0F, -2000.0F);
-        if (task.type == ExportTask.Type.ITEM) {
-            poseStack.scale(1.0F, 1.0F, 0.01F);
-            renderItemCentered(poseStack, bufferSource, task.itemStack, task.exportSize, task.zoomPercent, task.rotX, task.rotY);
-        } else {
-            if (entity == null) {
-                return false;
-            }
-            renderEntityCentered(poseStack, bufferSource, entity, task.exportSize, task.zoomPercent, task.rotX, task.rotY, task.offsetX, task.offsetY);
-        }
-        bufferSource.endBatch();
-        poseStack.popPose();
-
-        RenderSystem.setProjectionMatrix(previousProjection, VertexSorting.ORTHOGRAPHIC_Z);
-        BufferedImage image = readPixels(task.exportSize, task.exportSize, renderTarget, transparent);
-
-        try {
-            ImageIO.write(image, "png", output);
-        } catch (Exception e) {
-            LOGGER.warn("Failed to export image", e);
-            return false;
-        } finally {
-            previous.bindWrite(true);
-            RenderSystem.viewport(0, 0, mc.getWindow().getWidth(), mc.getWindow().getHeight());
+        GpuTexture sourceTexture = renderTarget.getColorTexture();
+        if (sourceTexture != null) {
+            GpuBuffer readBuffer = device.createBuffer(() -> "wikizoomer export buffer", 9, (long) task.exportSize * task.exportSize * sourceTexture.getFormat().blockSize());
+            device.createCommandEncoder().copyTextureToBuffer(
+                sourceTexture,
+                readBuffer,
+                0L,
+                () -> {
+                    try (GpuBufferSlice.MappedView read = readBuffer.map(true, false)) {
+                        NativeImage image = new NativeImage(task.exportSize, task.exportSize, false);
+                        for (int y = 0; y < task.exportSize; y++) {
+                            for (int x = 0; x < task.exportSize; x++) {
+                                int argb = read.data().getInt((x + y * task.exportSize) * sourceTexture.getFormat().blockSize());
+                                if (!transparent) {
+                                    argb |= 0xFF000000;
+                                }
+                                image.setPixelABGR(x, task.exportSize - y - 1, argb);
+                            }
+                        }
+                        try {
+                            image.writeToFile(output);
+                        } catch (Exception e) {
+                            LOGGER.warn("Failed to write exported image", e);
+                        }
+                    } finally {
+                        readBuffer.close();
+                    }
+                },
+                0
+            );
         }
         return true;
     }
@@ -263,7 +370,7 @@ public class ExportManager {
             if (renderTarget != null) {
                 renderTarget.destroyBuffers();
             }
-            renderTarget = new TextureTarget(exportSize, exportSize, true, Minecraft.ON_OSX);
+            renderTarget = new TextureTarget("wikizoomer", exportSize, exportSize, true, GpuFormat.RGBA8_UNORM);
             renderTargetSize = exportSize;
         }
     }
@@ -275,108 +382,11 @@ public class ExportManager {
         if (task.entityId == null) {
             return null;
         }
-        EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.get(task.entityId);
+        EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.get(task.entityId).map(net.minecraft.core.Holder::value).orElse(null);
         if (type == null || mc.level == null) {
             return null;
         }
-        return type.create(mc.level);
-    }
-
-    private static void renderItemCentered(PoseStack poseStack, MultiBufferSource.BufferSource bufferSource,
-                                            ItemStack stack, int exportSize, float zoomPercent, float rotX, float rotY) {
-        float scale = zoomPercent * 1.92F;
-        poseStack.pushPose();
-        poseStack.translate(exportSize / 2.0F, exportSize / 2.0F, 100.0F);
-        poseStack.scale(scale, -scale, scale);
-        poseStack.mulPose(Axis.XP.rotationDegrees(rotX));
-        poseStack.mulPose(Axis.YP.rotationDegrees(rotY));
-
-        Minecraft mc = Minecraft.getInstance();
-        BakedModel model = mc.getItemRenderer().getModel(stack, mc.level, null, 0);
-        if (!model.usesBlockLight()) {
-            Lighting.setupForFlatItems();
-        } else {
-            Lighting.setupFor3DItems();
-        }
-        mc.getItemRenderer().render(stack, ItemDisplayContext.GUI, false, poseStack, bufferSource, 15728880, OverlayTexture.NO_OVERLAY, model);
-        poseStack.popPose();
-    }
-
-    private static void renderEntityCentered(PoseStack poseStack, MultiBufferSource.BufferSource bufferSource,
-                                                Entity entity, int exportSize, float zoomPercent, float rotX, float rotY,
-                                                float offsetX, float offsetY) {
-        float centerX = exportSize / 2.0F + offsetX;
-        float centerY = (exportSize + ((zoomPercent / 100.0F) * (entity.getBbHeight() * 100.0F))) / 2.0F + offsetY;
-        Entity renderEntity = entity;
-        boolean isMimic = false;
-        if (WikiZoomerUnofficialClient.dataMimic != null && renderEntity.getType() == WikiZoomerUnofficialClient.dataMimic.getType()) {
-            renderEntity = WikiZoomerUnofficialClient.dataMimic;
-            isMimic = true;
-        }
-
-        poseStack.pushPose();
-        poseStack.translate(centerX, centerY, 10.0F);
-        poseStack.scale(zoomPercent, zoomPercent, zoomPercent);
-        poseStack.mulPose(Axis.ZP.rotationDegrees(180.0F));
-        float halfHeight = renderEntity.getBbHeight() / 2.0F;
-        poseStack.translate(0.0F, halfHeight, 0.0F);
-        poseStack.mulPose(Axis.XP.rotationDegrees(rotX));
-        poseStack.mulPose(Axis.YP.rotationDegrees(rotY));
-        poseStack.translate(0.0F, -halfHeight, 0.0F);
-
-        Minecraft mc = Minecraft.getInstance();
-        EntityRenderDispatcher entityRenderDispatcher = mc.getEntityRenderDispatcher();
-        Quaternionf cameraOrientation = Axis.XP.rotationDegrees(rotX);
-        cameraOrientation.conjugate();
-        entityRenderDispatcher.overrideCameraOrientation(cameraOrientation);
-        entityRenderDispatcher.setRenderShadow(false);
-
-        if (!isMimic) {
-            if (renderEntity instanceof LivingEntity livingEntity) {
-                livingEntity.yBodyRot = 0.0F;
-                livingEntity.yHeadRotO = 0.0F;
-                livingEntity.yHeadRot = 0.0F;
-            }
-            renderEntity.setYRot(0.0F);
-            renderEntity.setXRot(0.0F);
-            renderEntity.setOldPosAndRot();
-        }
-
-        Vector3f light0 = new Vector3f(-0.2F, 0.0F, 1.0F).normalize();
-        Vector3f light1 = new Vector3f(-0.2F, -1.0F, 0.0F).normalize();
-        RenderSystem.setShaderLights(light0, light1);
-
-        entityRenderDispatcher.render(renderEntity, 0.0D, 0.0D, 0.0D, 0.0F, mc.getTimer().getGameTimeDeltaPartialTick(true), poseStack, bufferSource, 15728880);
-        entityRenderDispatcher.setRenderShadow(true);
-        Lighting.setupFor3DItems();
-        poseStack.popPose();
-    }
-
-    private static BufferedImage readPixels(int width, int height, RenderTarget target, boolean transparent) {
-        int size = width * height;
-        if (pixelBuffer == null || pixelBuffer.capacity() < size) {
-            pixelBuffer = BufferUtils.createIntBuffer(size);
-            pixelValues = new int[size];
-        }
-        target.bindRead();
-        RenderSystem.bindTexture(target.getColorTextureId());
-        pixelBuffer.clear();
-        GL11.glGetTexImage(GL11.GL_TEXTURE_2D, 0, GL12.GL_BGRA, GL12.GL_UNSIGNED_INT_8_8_8_8_REV, pixelBuffer);
-        pixelBuffer.get(pixelValues);
-        processPixelValues(pixelValues, width, height);
-        BufferedImage image = new BufferedImage(width, height, transparent ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
-        image.setRGB(0, 0, width, height, pixelValues, 0, width);
-        return image;
-    }
-
-    private static void processPixelValues(int[] pixels, int width, int height) {
-        int[] row = new int[width];
-        int half = height / 2;
-        for (int y = 0; y < half; ++y) {
-            System.arraycopy(pixels, y * width, row, 0, width);
-            System.arraycopy(pixels, (height - 1 - y) * width, pixels, y * width, width);
-            System.arraycopy(row, 0, pixels, (height - 1 - y) * width, width);
-        }
+        return type.create(mc.level, EntitySpawnReason.LOAD);
     }
 
     private static void sendChat(Component message) {

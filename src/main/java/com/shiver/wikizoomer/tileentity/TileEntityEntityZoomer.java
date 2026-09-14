@@ -2,12 +2,12 @@ package com.shiver.wikizoomer.tileentity;
 
 import com.shiver.wikizoomer.ModDataComponents;
 import com.shiver.wikizoomer.WikiZoomerUnofficial;
-import com.shiver.wikizoomer.item.ItemEntityBinder;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
+import net.minecraft.world.entity.EntitySpawnRequest;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
@@ -46,7 +46,7 @@ public class TileEntityEntityZoomer extends TileEntityZoomerBase {
             try {
                 CompoundTag entityTag = item.get(ModDataComponents.ENTITY_TAG);
                 if (entityTag != null && this.getLevel() != null) {
-                    cachedEntity = EntityType.loadEntityRecursive(entityTag, this.getLevel(), entity -> entity);
+                    cachedEntity = EntityType.loadEntityRecursive(entityTag, this.getLevel(), new EntitySpawnRequest(EntitySpawnReason.LOAD, false), entity -> entity);
                     if (cachedEntity instanceof LivingEntity livingEntity) {
                         livingEntity.hurtTime = 0;
                     }
