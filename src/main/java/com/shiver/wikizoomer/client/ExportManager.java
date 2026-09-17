@@ -232,7 +232,6 @@ public class ExportManager {
         poseStack.pushPose();
         poseStack.translate(0.0F, 0.0F, -2000.0F);
         if (task.type == ExportTask.Type.ITEM) {
-            poseStack.scale(1.0F, 1.0F, 0.01F);
             renderItemCentered(poseStack, bufferSource, task.itemStack, task.exportSize, task.zoomPercent, task.rotX, task.rotY);
         } else {
             if (entity == null) {
@@ -241,6 +240,7 @@ public class ExportManager {
             renderEntityCentered(poseStack, bufferSource, entity, task.exportSize, task.zoomPercent, task.rotX, task.rotY, task.offsetX, task.offsetY);
         }
         bufferSource.endBatch();
+        Lighting.setupFor3DItems();
         poseStack.popPose();
 
         RenderSystem.setProjectionMatrix(previousProjection, VertexSorting.ORTHOGRAPHIC_Z);
