@@ -1,7 +1,5 @@
 package com.shiver.wikizoomer.screen;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.textures.FilterMode;
 import com.shiver.wikizoomer.client.ExportManager;
 import com.shiver.wikizoomer.client.ExportTask;
 import com.shiver.wikizoomer.tileentity.TileEntityEntityZoomer;
@@ -160,11 +158,7 @@ public class GuiEntityZoomer extends Screen {
             int targetSize = getExportSize();
             ExportManager.renderPreviewToTarget(Minecraft.getInstance(), ExportTask.Type.ENTITY, ItemStack.EMPTY, renderEntity,
                     sliderValue, background, targetSize, rotX, rotY, offsetX, offsetY);
-            if (ExportManager.renderTarget != null && ExportManager.renderTarget.getColorTextureView() != null) {
-                guiGraphics.blit(ExportManager.renderTarget.getColorTextureView(),
-                        RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST),
-                        left, top, left + previewSize, top + previewSize, 0.0F, 1.0F, 0.0F, 1.0F);
-            }
+            ExportManager.blitPreview(guiGraphics, left, top, previewSize);
         }
         prevSliderValue = sliderValue;
     }

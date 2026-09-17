@@ -2,24 +2,5 @@
   "parent": "item/generated",
   "textures": {
     "layer0": "wikizoomer:item/entity_binder"
-  },
-  "model_selects": [
-    {
-      "property": "minecraft:component",
-      "component": "wikizoomer:entity_tag",
-      "cases": [
-        {
-          "when": {
-            "type": "has_component"
-          },
-          "model": {
-            "parent": "item/generated",
-            "textures": {
-              "layer0": "wikizoomer:item/entity_binder_bound"
-            }
-          }
-        }
-      ]
-    }
-  ]
+  }
 }

@@ -11,6 +11,7 @@ import net.minecraft.world.entity.EntitySpawnRequest;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.BaseSpawner;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -46,7 +47,9 @@ public class TileEntityEntityZoomer extends TileEntityZoomerBase {
             try {
                 CompoundTag entityTag = item.get(ModDataComponents.ENTITY_TAG);
                 if (entityTag != null && this.getLevel() != null) {
-                    cachedEntity = EntityType.loadEntityRecursive(entityTag, this.getLevel(), new EntitySpawnRequest(EntitySpawnReason.LOAD, false), entity -> entity);
+                    // 递归设置展示实体及其乘客的 ID，避免 26.2 渲染器读取未分配的 ID。
+                    cachedEntity = EntityType.loadEntityRecursive(entityTag, this.getLevel(),
+                            new EntitySpawnRequest(EntitySpawnReason.LOAD, false), BaseSpawner.SET_DISPLAY_ENTITY_ID);
                     if (cachedEntity instanceof LivingEntity livingEntity) {
                         livingEntity.hurtTime = 0;
                     }

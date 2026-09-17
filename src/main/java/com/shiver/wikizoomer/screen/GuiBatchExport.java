@@ -127,7 +127,7 @@ public class GuiBatchExport extends Screen {
     @Override
     public void extractRenderState(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, float partialTicks) {
         super.extractRenderState(guiGraphics, mouseX, mouseY, partialTicks);
-        guiGraphics.centeredText(this.font, Component.translatable("gui.wikizoomer.batch_title"), this.width / 2, 12, 0xFFFFFF);
+        guiGraphics.centeredText(this.font, Component.translatable("gui.wikizoomer.batch_title"), this.width / 2, 12, 0xFFFFFFFF);
     }
 
     private void startExport() {
@@ -287,7 +287,7 @@ public class GuiBatchExport extends Screen {
 
         @Override
         public void extractContent(GuiGraphicsExtractor guiGraphics, int mouseX, int mouseY, boolean hovered, float partialTicks) {
-            int color = selected ? 0x00FF00 : 0xFFFFFF;
+            int color = selected ? 0xFF00FF00 : 0xFFFFFFFF;
             String label = (selected ? "[x] " : "[ ] ") + modName + " (" + modId + ")";
             guiGraphics.text(Minecraft.getInstance().font, label, this.getContentX() + 2, this.getContentY() + 2, color);
         }

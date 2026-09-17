@@ -9,18 +9,24 @@ import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.GpuDevice;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.FilterMode;
 import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
 import com.shiver.wikizoomer.WikiZoomerUnofficialClient;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.render.TextureSetup;
 import net.minecraft.client.renderer.Projection;
 import net.minecraft.client.renderer.ProjectionMatrixBuffer;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.SubmitNodeStorage;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
 import net.minecraft.client.renderer.item.TrackingItemStackRenderState;
+import net.minecraft.client.renderer.state.gui.BlitRenderState;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -32,8 +38,10 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.BaseSpawner;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.joml.Matrix3x2f;
 import org.joml.Matrix4fStack;
 import org.joml.Quaternionf;
 import org.joml.Vector4f;
@@ -225,82 +233,104 @@ public class ExportManager {
 
         Projection projection = new Projection();
         projection.setupOrtho(-1000.0F, 1000.0F, exportSize, exportSize, true);
-        ProjectionMatrixBuffer projectionBuffer = new ProjectionMatrixBuffer("wikizoomer_preview");
-        RenderSystem.setProjectionMatrix(projectionBuffer.getBuffer(projection), ProjectionType.ORTHOGRAPHIC);
-
-        RenderSystem.outputColorTextureOverride = renderTarget.getColorTextureView();
-        RenderSystem.outputDepthTextureOverride = renderTarget.getDepthTextureView();
-
+        GpuBufferSlice previousProjection = RenderSystem.getProjectionMatrixBuffer();
+        ProjectionType previousProjectionType = RenderSystem.getProjectionType();
+        GpuBufferSlice previousLighting = RenderSystem.getShaderLights();
+        GpuTextureView previousColorTarget = RenderSystem.outputColorTextureOverride;
+        GpuTextureView previousDepthTarget = RenderSystem.outputDepthTextureOverride;
         Matrix4fStack modelViewStack = RenderSystem.getModelViewStack();
         modelViewStack.pushMatrix();
+        try (ProjectionMatrixBuffer projectionBuffer = new ProjectionMatrixBuffer("wikizoomer_preview")) {
+            RenderSystem.setProjectionMatrix(projectionBuffer.getBuffer(projection), ProjectionType.ORTHOGRAPHIC);
+            RenderSystem.outputColorTextureOverride = renderTarget.getColorTextureView();
+            RenderSystem.outputDepthTextureOverride = renderTarget.getDepthTextureView();
 
-        SubmitNodeStorage submitNodeStorage = new SubmitNodeStorage();
-        PoseStack poseStack = new PoseStack();
+            SubmitNodeStorage submitNodeStorage = new SubmitNodeStorage();
+            PoseStack poseStack = new PoseStack();
 
-        if (type == ExportTask.Type.ITEM) {
-            TrackingItemStackRenderState itemState = new TrackingItemStackRenderState();
-            mc.getItemModelResolver().updateForTopItem(itemState, itemStack, ItemDisplayContext.GUI, mc.level, null, 0);
-            boolean flat = !itemState.usesBlockLight();
-            if (flat) {
-                mc.gameRenderer.lighting().setupFor(Lighting.Entry.ITEMS_FLAT);
-            } else {
-                mc.gameRenderer.lighting().setupFor(Lighting.Entry.ITEMS_3D);
-            }
-
-            poseStack.pushPose();
-            poseStack.translate(exportSize / 2.0F, exportSize / 2.0F, 0.0F);
-            float scale = zoomPercent * 1.92F;
-            poseStack.scale(scale, -scale, -scale);
-            poseStack.mulPose(Axis.XP.rotationDegrees(rotX));
-            poseStack.mulPose(Axis.YP.rotationDegrees(rotY));
-            itemState.submit(poseStack, submitNodeStorage, 15728880, OverlayTexture.NO_OVERLAY, 0);
-            poseStack.popPose();
-        } else {
-            mc.gameRenderer.lighting().setupFor(Lighting.Entry.ENTITY_IN_UI);
-            EntityRenderDispatcher dispatcher = mc.getEntityRenderDispatcher();
-            Entity renderEntity = entity;
-            if (WikiZoomerUnofficialClient.dataMimic != null && renderEntity.getType() == WikiZoomerUnofficialClient.dataMimic.getType()) {
-                renderEntity = WikiZoomerUnofficialClient.dataMimic;
-            } else {
-                renderEntity.setYRot(0.0F);
-                renderEntity.setXRot(0.0F);
-                if (renderEntity instanceof LivingEntity livingEntity) {
-                    livingEntity.yBodyRot = 0.0F;
-                    livingEntity.yHeadRotO = 0.0F;
-                    livingEntity.yHeadRot = 0.0F;
+            if (type == ExportTask.Type.ITEM) {
+                TrackingItemStackRenderState itemState = new TrackingItemStackRenderState();
+                mc.getItemModelResolver().updateForTopItem(itemState, itemStack, ItemDisplayContext.GUI, mc.level, null, 0);
+                boolean flat = !itemState.usesBlockLight();
+                if (flat) {
+                    mc.gameRenderer.lighting().setupFor(Lighting.Entry.ITEMS_FLAT);
+                } else {
+                    mc.gameRenderer.lighting().setupFor(Lighting.Entry.ITEMS_3D);
                 }
-                renderEntity.setOldPosAndRot();
+
+                poseStack.pushPose();
+                poseStack.translate(exportSize / 2.0F, exportSize / 2.0F, 0.0F);
+                float scale = zoomPercent * 1.92F;
+                // 与原版 GUI 物品一致，仅翻转 Y，保留模型的深度顺序。
+                poseStack.scale(scale, -scale, scale);
+                poseStack.mulPose(Axis.XP.rotationDegrees(rotX));
+                poseStack.mulPose(Axis.YP.rotationDegrees(rotY));
+                itemState.submit(poseStack, submitNodeStorage, 15728880, OverlayTexture.NO_OVERLAY, 0);
+                poseStack.popPose();
+            } else {
+                mc.gameRenderer.lighting().setupFor(Lighting.Entry.ENTITY_IN_UI);
+                EntityRenderDispatcher dispatcher = mc.getEntityRenderDispatcher();
+                Entity renderEntity = entity;
+                if (WikiZoomerUnofficialClient.dataMimic != null && renderEntity.getType() == WikiZoomerUnofficialClient.dataMimic.getType()) {
+                    renderEntity = WikiZoomerUnofficialClient.dataMimic;
+                } else {
+                    renderEntity.setYRot(0.0F);
+                    renderEntity.setXRot(0.0F);
+                    if (renderEntity instanceof LivingEntity livingEntity) {
+                        livingEntity.yBodyRot = 0.0F;
+                        livingEntity.yHeadRotO = 0.0F;
+                        livingEntity.yHeadRot = 0.0F;
+                    }
+                    renderEntity.setOldPosAndRot();
+                }
+
+                EntityRenderState renderState = dispatcher.extractEntity(renderEntity, 1.0F);
+                renderState.lightCoords = 15728880;
+                renderState.shadowPieces.clear();
+
+                poseStack.pushPose();
+                float centerX = exportSize / 2.0F + offsetX;
+                float centerY = (exportSize + ((zoomPercent / 100.0F) * (renderEntity.getBbHeight() * 100.0F))) / 2.0F + offsetY;
+                poseStack.translate(centerX, centerY, 0.0F);
+                // 保留移植前的实体朝向，Z 轴翻转会把默认视角变成仰视背面。
+                poseStack.scale(zoomPercent, zoomPercent, zoomPercent);
+                poseStack.mulPose(Axis.ZP.rotationDegrees(180.0F));
+                float halfHeight = renderEntity.getBbHeight() / 2.0F;
+                poseStack.translate(0.0F, halfHeight, 0.0F);
+                poseStack.mulPose(Axis.XP.rotationDegrees(rotX));
+                poseStack.mulPose(Axis.YP.rotationDegrees(rotY));
+                poseStack.translate(0.0F, -halfHeight, 0.0F);
+
+                Quaternionf cameraAngle = Axis.XP.rotationDegrees(rotX);
+                CameraRenderState cameraRenderState = new CameraRenderState();
+                cameraRenderState.orientation = cameraAngle.conjugate(new Quaternionf());
+
+                dispatcher.submit(renderState, cameraRenderState, 0.0, 0.0, 0.0, poseStack, submitNodeStorage);
+                poseStack.popPose();
             }
 
-            EntityRenderState renderState = dispatcher.extractEntity(renderEntity, 1.0F);
-            renderState.lightCoords = 15728880;
-
-            poseStack.pushPose();
-            float centerX = exportSize / 2.0F + offsetX;
-            float centerY = (exportSize + ((zoomPercent / 100.0F) * (renderEntity.getBbHeight() * 100.0F))) / 2.0F + offsetY;
-            poseStack.translate(centerX, centerY, 0.0F);
-            poseStack.scale(zoomPercent, zoomPercent, -zoomPercent);
-            poseStack.mulPose(Axis.ZP.rotationDegrees(180.0F));
-            float halfHeight = renderEntity.getBbHeight() / 2.0F;
-            poseStack.translate(0.0F, halfHeight, 0.0F);
-            poseStack.mulPose(Axis.XP.rotationDegrees(rotX));
-            poseStack.mulPose(Axis.YP.rotationDegrees(rotY));
-            poseStack.translate(0.0F, -halfHeight, 0.0F);
-
-            Quaternionf cameraAngle = Axis.XP.rotationDegrees(rotX);
-            CameraRenderState cameraRenderState = new CameraRenderState();
-            cameraRenderState.orientation = cameraAngle.conjugate(new Quaternionf()).rotateY((float) Math.PI);
-
-            dispatcher.submit(renderState, cameraRenderState, 0.0, 0.0, 0.0, poseStack, submitNodeStorage);
-            poseStack.popPose();
+            getFeatureRenderDispatcher().renderAllFeatures(submitNodeStorage);
+        } finally {
+            modelViewStack.popMatrix();
+            RenderSystem.outputColorTextureOverride = previousColorTarget;
+            RenderSystem.outputDepthTextureOverride = previousDepthTarget;
+            RenderSystem.setProjectionMatrix(previousProjection, previousProjectionType);
+            RenderSystem.setShaderLights(previousLighting);
         }
+    }
 
-        getFeatureRenderDispatcher().renderAllFeatures(submitNodeStorage);
-        modelViewStack.popMatrix();
-
-        RenderSystem.outputColorTextureOverride = null;
-        RenderSystem.outputDepthTextureOverride = null;
-        projectionBuffer.close();
+    public static void blitPreview(GuiGraphicsExtractor guiGraphics, int left, int top, int size) {
+        if (renderTarget == null || renderTarget.getColorTextureView() == null) {
+            return;
+        }
+        // 渲染目标的 V 轴与 GUI 相反，且透明像素已经预乘 Alpha。
+        guiGraphics.submitGuiElementRenderState(new BlitRenderState(
+                RenderPipelines.GUI_TEXTURED_PREMULTIPLIED_ALPHA,
+                TextureSetup.singleTexture(renderTarget.getColorTextureView(),
+                        RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST)),
+                new Matrix3x2f(guiGraphics.pose()),
+                left, top, left + size, top + size,
+                0.0F, 1.0F, 1.0F, 0.0F, -1, guiGraphics.peekScissorStack()));
     }
 
     private static boolean renderTask(Minecraft mc, ExportTask task) {
@@ -336,15 +366,14 @@ public class ExportManager {
                 readBuffer,
                 0L,
                 () -> {
-                    try (GpuBufferSlice.MappedView read = readBuffer.map(true, false)) {
-                        NativeImage image = new NativeImage(task.exportSize, task.exportSize, false);
+                    try (GpuBufferSlice.MappedView read = readBuffer.map(true, false);
+                         NativeImage image = new NativeImage(task.exportSize, task.exportSize, false)) {
                         for (int y = 0; y < task.exportSize; y++) {
                             for (int x = 0; x < task.exportSize; x++) {
-                                int argb = read.data().getInt((x + y * task.exportSize) * sourceTexture.getFormat().blockSize());
-                                if (!transparent) {
-                                    argb |= 0xFF000000;
-                                }
-                                image.setPixelABGR(x, task.exportSize - y - 1, argb);
+                                int abgr = read.data().getInt((x + y * task.exportSize) * sourceTexture.getFormat().blockSize());
+                                // PNG 使用非预乘颜色，避免半透明材质在图像软件中再次变暗。
+                                abgr = transparent ? unpremultiplyAlpha(abgr) : abgr | 0xFF000000;
+                                image.setPixelABGR(x, task.exportSize - y - 1, abgr);
                             }
                         }
                         try {
@@ -360,6 +389,20 @@ public class ExportManager {
             );
         }
         return true;
+    }
+
+    private static int unpremultiplyAlpha(int abgr) {
+        int alpha = abgr >>> 24;
+        if (alpha == 0) {
+            return 0;
+        }
+        if (alpha == 255) {
+            return abgr;
+        }
+        int red = Math.min(255, ((abgr & 0xFF) * 255 + alpha / 2) / alpha);
+        int green = Math.min(255, (((abgr >>> 8) & 0xFF) * 255 + alpha / 2) / alpha);
+        int blue = Math.min(255, (((abgr >>> 16) & 0xFF) * 255 + alpha / 2) / alpha);
+        return (alpha << 24) | (blue << 16) | (green << 8) | red;
     }
 
     private static void ensureRenderTarget(int exportSize) {
@@ -383,7 +426,9 @@ public class ExportManager {
         if (type == null || mc.level == null) {
             return null;
         }
-        return type.create(mc.level, EntitySpawnReason.LOAD);
+        Entity entity = type.create(mc.level, EntitySpawnReason.LOAD);
+        // 26.2 客户端新建实体没有 ID，沿用原版刷怪笼的展示实体处理方式。
+        return entity == null ? null : BaseSpawner.SET_DISPLAY_ENTITY_ID.process(entity);
     }
 
     private static void sendChat(Component message) {
