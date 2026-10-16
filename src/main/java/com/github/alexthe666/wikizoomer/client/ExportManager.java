@@ -210,7 +210,12 @@ public class ExportManager {
 
         int exportSize = task.exportSize;
         ensureFramebuffer(exportSize);
-        File output = task.outputFile;
+        File targetOutput = task.outputFile;
+        if (task.isGif && targetOutput.getName().toLowerCase().endsWith(".gif")) {
+            String name = targetOutput.getName();
+            targetOutput = new File(targetOutput.getParentFile(), name.substring(0, name.length() - 4) + ".png");
+        }
+        final File output = targetOutput;
         File parent = output.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
             LOGGER.warn("Could not create export directory: {}", parent.getAbsolutePath());
@@ -367,7 +372,7 @@ public class ExportManager {
                 // Advance animation by 1 tick
                 mc.getTextureManager().bindTexture(TextureMap.LOCATION_BLOCKS_TEXTURE);
                 for (TextureAtlasSprite sprite : animatedSprites) {
-                    sprite.updateAnimation();
+                    TextureAnimationHelper.updateSpriteAnimation(sprite);
                 }
             }
         } catch (Exception e) {
@@ -387,11 +392,15 @@ public class ExportManager {
             // Restore animated sprites to original state
             mc.getTextureManager().bindTexture(TextureMap.LOCATION_BLOCKS_TEXTURE);
             for (TextureAtlasSprite sprite : animatedSprites) {
-                int fc = savedFrameCounters.get(sprite);
-                int tc = savedTickCounters.get(sprite);
-                TextureAnimationHelper.setFrameCounter(sprite, fc);
-                TextureAnimationHelper.setTickCounter(sprite, tc);
-                TextureAnimationHelper.uploadFrame(sprite, fc);
+                Integer fc = savedFrameCounters.get(sprite);
+                Integer tc = savedTickCounters.get(sprite);
+                if (fc != null) {
+                    TextureAnimationHelper.setFrameCounter(sprite, fc);
+                    TextureAnimationHelper.uploadFrame(sprite, fc);
+                }
+                if (tc != null) {
+                    TextureAnimationHelper.setTickCounter(sprite, tc);
+                }
             }
         }
 
@@ -455,6 +464,7 @@ public class ExportManager {
         GlStateManager.tryBlendFuncSeparate(GlStateManager.SourceFactor.SRC_ALPHA, GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA, GlStateManager.SourceFactor.ONE, GlStateManager.DestFactor.ZERO);
         GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
         GlStateManager.pushMatrix();
+        RenderHelper.enableGUIStandardItemLighting();
         GlStateManager.translate(exportSize / 2F, exportSize / 2F, zOffset);
         GlStateManager.scale(scale, scale, scale);
         renderItem.zLevel += 50.0F;
@@ -471,13 +481,13 @@ public class ExportManager {
             } else {
                 GlStateManager.disableLighting();
             }
-            RenderHelper.enableGUIStandardItemLighting();
             model = ForgeHooksClient.handleCameraTransforms(model, ItemCameraTransforms.TransformType.GUI, false);
             if (stack.getItem() instanceof ItemBlock) {
                 GlStateManager.rotate(rotX, 1.0F, 0.0F, 0.0F);
                 GlStateManager.rotate(rotY, 0.0F, 1.0F, 0.0F);
             }
             renderItem.renderItem(stack, model);
+            GlStateManager.disableLighting();
             RenderHelper.disableStandardItemLighting();
             GlStateManager.disableRescaleNormal();
             Minecraft.getMinecraft().getTextureManager().bindTexture(TextureMap.LOCATION_BLOCKS_TEXTURE);

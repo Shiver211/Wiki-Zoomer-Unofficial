@@ -37,3 +37,6 @@ itemGroup.wikizoomer=Wiki Zoomer
 gui.wikizoomer.clear_config=Clear Config
 gui.wikizoomer.configured=Configured
 gui.wikizoomer.resolution_configured=Resolution: Configured
+gui.wikizoomer.batch_gif=Animated GIF: %s
+gui.wikizoomer.on=ON
+gui.wikizoomer.off=OFF

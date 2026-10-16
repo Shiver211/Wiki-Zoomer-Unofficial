@@ -219,12 +219,11 @@ public class GuiItemZoomer extends GuiScreen {
             GlStateManager.matrixMode(org.lwjgl.opengl.GL11.GL_MODELVIEW);
             GlStateManager.pushMatrix();
             GlStateManager.loadIdentity();
+            RenderHelper.enableGUIStandardItemLighting();
             GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
             GlStateManager.enableDepth();
             GlStateManager.translate(i, j, 0F);
             GlStateManager.scale(displayScale, displayScale, displayScale);
-            GlStateManager.enableLighting();
-            RenderHelper.enableGUIStandardItemLighting();
             renderItemPreview(stack, -8, -8);
             RenderHelper.disableStandardItemLighting();
             GlStateManager.disableLighting();
@@ -242,7 +241,13 @@ public class GuiItemZoomer extends GuiScreen {
         drawRect(boxX, boxY + boxSize - 1, boxX + boxSize, boxY + boxSize, 0xFFFF0000);
         drawRect(boxX, boxY, boxX + 1, boxY + boxSize, 0xFFFF0000);
         drawRect(boxX + boxSize - 1, boxY, boxX + boxSize, boxY + boxSize, 0xFFFF0000);
-        GlStateManager.enableDepth();
+
+        // Restore clean GUI render state for buttons and text
+        GlStateManager.disableDepth();
+        GlStateManager.enableAlpha();
+        GlStateManager.alphaFunc(516, 0.1F);
+        GlStateManager.enableBlend();
+        GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
 
         GuiButton exportBtn = getButtonById(3);
         if (exportBtn != null) {

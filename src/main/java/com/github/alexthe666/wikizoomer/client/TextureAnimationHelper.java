@@ -3,11 +3,13 @@ package com.github.alexthe666.wikizoomer.client;
 import net.minecraft.block.Block;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.renderer.RenderItem;
 import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.block.model.IBakedModel;
 import net.minecraft.client.renderer.block.model.ItemCameraTransforms;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.client.renderer.texture.TextureMap;
 import net.minecraft.client.renderer.texture.TextureUtil;
 import net.minecraft.client.resources.data.AnimationMetadataSection;
 import net.minecraft.item.ItemBlock;
@@ -34,6 +36,7 @@ public class TextureAnimationHelper {
     private static Field animationMetadataField;
     private static Field frameCounterField;
     private static Field tickCounterField;
+    private static Field listAnimatedSpritesField;
     private static boolean reflectionInitialized = false;
 
     private static synchronized void initReflection() {
@@ -42,6 +45,7 @@ public class TextureAnimationHelper {
         animationMetadataField = findFieldSafely(TextureAtlasSprite.class, "field_110982_k", "animationMetadata");
         frameCounterField = findFieldSafely(TextureAtlasSprite.class, "field_110973_g", "frameCounter");
         tickCounterField = findFieldSafely(TextureAtlasSprite.class, "field_110983_h", "tickCounter");
+        listAnimatedSpritesField = findFieldSafely(TextureMap.class, "field_94258_i", "listAnimatedSprites");
     }
 
     private static Field findFieldSafely(Class<?> clazz, String srgName, String mcpName) {
@@ -87,89 +91,149 @@ public class TextureAnimationHelper {
 
         collectSpritesFromModel(model, stack, sprites);
 
+        GlStateManager.pushMatrix();
         try {
             IBakedModel guiModel = ForgeHooksClient.handleCameraTransforms(model, ItemCameraTransforms.TransformType.GUI, false);
             if (guiModel != null && guiModel != model) {
                 collectSpritesFromModel(guiModel, stack, sprites);
             }
         } catch (Throwable ignored) {
+        } finally {
+            GlStateManager.popMatrix();
         }
 
         return sprites;
     }
 
-    private static void collectSpritesFromModel(IBakedModel model, ItemStack stack, Set<TextureAtlasSprite> sprites) {
+    public static boolean isSpriteAnimated(TextureAtlasSprite sprite) {
+        if (sprite == null) return false;
+        if (sprite.hasAnimationMetadata()) return true;
+        if (sprite.getFrameCount() > 1) return true;
+        AnimationMetadataSection meta = getAnimationMetadata(sprite);
+        return meta != null && meta.getFrameCount() > 1;
+    }
+
+    private static List<TextureAtlasSprite> getTextureMapAnimatedSprites() {
+        initReflection();
+        if (listAnimatedSpritesField != null) {
+            try {
+                TextureMap map = Minecraft.getMinecraft().getTextureMapBlocks();
+                if (map != null) {
+                    @SuppressWarnings("unchecked")
+                    List<TextureAtlasSprite> list = (List<TextureAtlasSprite>) listAnimatedSpritesField.get(map);
+                    if (list != null) {
+                        return list;
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+        return java.util.Collections.emptyList();
+    }
+
+    private static void checkAndAddQuadSprite(BakedQuad quad, Set<TextureAtlasSprite> sprites) {
+        if (quad == null) return;
+        TextureAtlasSprite quadSprite = quad.getSprite();
+        if (quadSprite != null) {
+            if (isSpriteAnimated(quadSprite)) {
+                sprites.add(quadSprite);
+            }
+            return;
+        }
+
+        int[] vertexData = quad.getVertexData();
+        if (vertexData == null || vertexData.length < 28) return;
+
+        List<TextureAtlasSprite> animatedList = getTextureMapAnimatedSprites();
+        if (animatedList.isEmpty()) return;
+
+        int step = vertexData.length / 4;
+        if (step < 7) step = 7;
+
+        for (int v = 0; v < 4; v++) {
+            int uIdx = v * step + 4;
+            int vIdx = v * step + 5;
+            if (vIdx >= vertexData.length) break;
+
+            float u = Float.intBitsToFloat(vertexData[uIdx]);
+            float vCoord = Float.intBitsToFloat(vertexData[vIdx]);
+
+            for (TextureAtlasSprite animSprite : animatedList) {
+                if (animSprite == null) continue;
+                if (u >= animSprite.getMinU() - 0.0005F && u <= animSprite.getMaxU() + 0.0005F
+                        && vCoord >= animSprite.getMinV() - 0.0005F && vCoord <= animSprite.getMaxV() + 0.0005F) {
+                    if (isSpriteAnimated(animSprite)) {
+                        sprites.add(animSprite);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void collectSpritesFromQuads(IBakedModel model, IBlockState state, Set<TextureAtlasSprite> sprites) {
         if (model == null) return;
-
-        boolean foundQuadSprite = false;
-
         try {
-            List<BakedQuad> generalQuads = model.getQuads(null, null, 0L);
+            List<BakedQuad> generalQuads = model.getQuads(state, null, 0L);
             if (generalQuads != null) {
                 for (BakedQuad quad : generalQuads) {
-                    if (quad != null && quad.getSprite() != null) {
-                        foundQuadSprite = true;
-                        if (quad.getSprite().hasAnimationMetadata()) {
-                            sprites.add(quad.getSprite());
-                        }
-                    }
+                    checkAndAddQuadSprite(quad, sprites);
                 }
             }
         } catch (Throwable ignored) {}
 
         for (EnumFacing facing : EnumFacing.values()) {
             try {
-                List<BakedQuad> faceQuads = model.getQuads(null, facing, 0L);
+                List<BakedQuad> faceQuads = model.getQuads(state, facing, 0L);
                 if (faceQuads != null) {
                     for (BakedQuad quad : faceQuads) {
-                        if (quad != null && quad.getSprite() != null) {
-                            foundQuadSprite = true;
-                            if (quad.getSprite().hasAnimationMetadata()) {
-                                sprites.add(quad.getSprite());
-                            }
-                        }
+                        checkAndAddQuadSprite(quad, sprites);
                     }
                 }
             } catch (Throwable ignored) {}
         }
+    }
+
+    private static void collectSpritesFromModel(IBakedModel model, ItemStack stack, Set<TextureAtlasSprite> sprites) {
+        if (model == null) return;
+
+        collectSpritesFromQuads(model, null, sprites);
+
+        try {
+            TextureAtlasSprite particle = model.getParticleTexture();
+            if (isSpriteAnimated(particle)) {
+                sprites.add(particle);
+            }
+        } catch (Throwable ignored) {}
 
         if (stack.getItem() instanceof ItemBlock) {
             try {
                 Block block = ((ItemBlock) stack.getItem()).getBlock();
-                IBlockState state = block.getStateFromMeta(stack.getMetadata());
-                List<BakedQuad> stateGeneral = model.getQuads(state, null, 0L);
-                if (stateGeneral != null) {
-                    for (BakedQuad quad : stateGeneral) {
-                        if (quad != null && quad.getSprite() != null) {
-                            foundQuadSprite = true;
-                            if (quad.getSprite().hasAnimationMetadata()) {
-                                sprites.add(quad.getSprite());
-                            }
-                        }
-                    }
+                IBlockState state = null;
+                try {
+                    state = block.getStateFromMeta(stack.getMetadata());
+                } catch (Throwable ignored) {}
+                if (state == null) {
+                    try {
+                        state = block.getDefaultState();
+                    } catch (Throwable ignored) {}
                 }
-                for (EnumFacing facing : EnumFacing.values()) {
-                    List<BakedQuad> stateFace = model.getQuads(state, facing, 0L);
-                    if (stateFace != null) {
-                        for (BakedQuad quad : stateFace) {
-                            if (quad != null && quad.getSprite() != null) {
-                                foundQuadSprite = true;
-                                if (quad.getSprite().hasAnimationMetadata()) {
-                                    sprites.add(quad.getSprite());
+
+                if (state != null) {
+                    collectSpritesFromQuads(model, state, sprites);
+
+                    Minecraft mc = Minecraft.getMinecraft();
+                    if (mc != null && mc.getBlockRendererDispatcher() != null) {
+                        try {
+                            IBakedModel blockModel = mc.getBlockRendererDispatcher().getModelForState(state);
+                            if (blockModel != null && blockModel != model) {
+                                collectSpritesFromQuads(blockModel, state, sprites);
+                                collectSpritesFromQuads(blockModel, null, sprites);
+                                TextureAtlasSprite p = blockModel.getParticleTexture();
+                                if (isSpriteAnimated(p)) {
+                                    sprites.add(p);
                                 }
                             }
-                        }
+                        } catch (Throwable ignored) {}
                     }
-                }
-            } catch (Throwable ignored) {}
-        }
-
-        // If no quads had sprites, fallback to particle texture
-        if (!foundQuadSprite) {
-            try {
-                TextureAtlasSprite particle = model.getParticleTexture();
-                if (particle != null && particle.hasAnimationMetadata()) {
-                    sprites.add(particle);
                 }
             } catch (Throwable ignored) {}
         }
@@ -225,8 +289,11 @@ public class TextureAnimationHelper {
     }
 
     public static int getSpritePeriodTicks(TextureAtlasSprite sprite) {
+        if (sprite == null) return 1;
         AnimationMetadataSection meta = getAnimationMetadata(sprite);
-        if (meta == null) return 1;
+        if (meta == null) {
+            return sprite.getFrameCount() > 1 ? sprite.getFrameCount() : 1;
+        }
         int count = meta.getFrameCount();
         if (count == 0) {
             count = sprite.getFrameCount();
@@ -238,6 +305,28 @@ public class TextureAnimationHelper {
             totalTicks += meta.getFrameTimeSingle(i);
         }
         return totalTicks > 0 ? totalTicks : 1;
+    }
+
+    public static void updateSpriteAnimation(TextureAtlasSprite sprite) {
+        if (sprite == null) return;
+        if (sprite.hasAnimationMetadata()) {
+            try {
+                sprite.updateAnimation();
+                return;
+            } catch (Throwable ignored) {}
+        }
+        int frameCount = sprite.getFrameCount();
+        if (frameCount > 1) {
+            int fc = getFrameCounter(sprite);
+            int tc = getTickCounter(sprite) + 1;
+            setTickCounter(sprite, tc);
+            if (tc >= 1) {
+                fc = (fc + 1) % frameCount;
+                setFrameCounter(sprite, fc);
+                setTickCounter(sprite, 0);
+                uploadFrame(sprite, fc);
+            }
+        }
     }
 
     public static int getTotalPeriodTicks(Collection<TextureAtlasSprite> sprites) {

@@ -222,7 +222,13 @@ public class GuiEntityZoomer extends GuiScreen {
         drawRect(boxX, boxY + boxSize - 1, boxX + boxSize, boxY + boxSize, 0xFFFF0000);
         drawRect(boxX, boxY, boxX + 1, boxY + boxSize, 0xFFFF0000);
         drawRect(boxX + boxSize - 1, boxY, boxX + boxSize, boxY + boxSize, 0xFFFF0000);
-        GlStateManager.enableDepth();
+
+        // Restore clean GUI render state for buttons and text
+        GlStateManager.disableDepth();
+        GlStateManager.enableAlpha();
+        GlStateManager.alphaFunc(516, 0.1F);
+        GlStateManager.enableBlend();
+        GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
 
         super.drawScreen(mouseX, mouseY, partialTicks);
     }

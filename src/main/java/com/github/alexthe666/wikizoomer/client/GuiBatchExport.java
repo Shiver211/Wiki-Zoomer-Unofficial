@@ -35,6 +35,7 @@ public class GuiBatchExport extends GuiScreen {
     private List<ModEntry> entries = new ArrayList<>();
     private boolean exportItems = true;
     private boolean exportEntities = true;
+    private boolean exportAnimatedGif = ModConfig.exportAnimatedTexturesAsGif;
     private boolean useItemConfig = true;
     private boolean useEntityConfig = true;
     private boolean sliderModified = false;
@@ -58,6 +59,7 @@ public class GuiBatchExport extends GuiScreen {
     };
     private GuiButton itemsButton;
     private GuiButton entitiesButton;
+    private GuiButton gifButton;
     private GuiButton backgroundButton;
     private GuiButton resolutionButton;
     private GuiButton selectAllButton;
@@ -75,18 +77,19 @@ public class GuiBatchExport extends GuiScreen {
         int spacing = 20;
         int rowWidth = buttonWidth * 3 + spacing * 2;
         int startX = this.width / 2 - rowWidth / 2;
-        int row1Y = this.height - 90;
-        int row2Y = row1Y + 22;
-        int row3Y = row2Y + 22;
+        int row1Y = this.height - 100;
+        int row2Y = row1Y + 24;
+        int row3Y = row2Y + 24;
+        int row4Y = row3Y + 24;
         int listTop = 32;
-        int listBottom = row1Y - 10;
+        int listBottom = row1Y - 8;
         this.modList = new ModListWidget(this.mc, this.width, this.height, listTop, listBottom, 20, this.entries);
         int col1X = startX;
         int col2X = startX + buttonWidth + spacing;
         int col3X = startX + (buttonWidth + spacing) * 2;
         this.itemsButton = new GuiButton(0, col1X, row1Y, buttonWidth, buttonHeight, "");
         this.entitiesButton = new GuiButton(1, col2X, row1Y, buttonWidth, buttonHeight, "");
-        this.backgroundButton = new GuiButton(2, col3X, row1Y, buttonWidth, buttonHeight, "");
+        this.gifButton = new GuiButton(9, col3X, row1Y, buttonWidth, buttonHeight, "");
         net.minecraft.client.gui.GuiSlider.FormatHelper formatHelper = new net.minecraft.client.gui.GuiSlider.FormatHelper() {
             @Override
             public String getText(int id, String name, float value) {
@@ -100,13 +103,15 @@ public class GuiBatchExport extends GuiScreen {
         slider.width = buttonWidth;
         slider.height = buttonHeight;
         this.addButton(slider);
-        this.resolutionButton = new GuiButton(3, col2X, row2Y, buttonWidth, buttonHeight, "");
-        this.selectAllButton = new GuiButton(4, col3X, row2Y, buttonWidth, buttonHeight, I18n.format("gui.wikizoomer.batch_select_all"));
-        this.clearButton = new GuiButton(5, col1X, row3Y, buttonWidth, buttonHeight, I18n.format("gui.wikizoomer.batch_clear"));
-        this.startButton = new GuiButton(6, col2X, row3Y, buttonWidth, buttonHeight, I18n.format("gui.wikizoomer.batch_start"));
+        this.backgroundButton = new GuiButton(2, col2X, row2Y, buttonWidth, buttonHeight, "");
+        this.resolutionButton = new GuiButton(3, col3X, row2Y, buttonWidth, buttonHeight, "");
+        this.selectAllButton = new GuiButton(4, col1X, row3Y, buttonWidth, buttonHeight, I18n.format("gui.wikizoomer.batch_select_all"));
+        this.clearButton = new GuiButton(5, col2X, row3Y, buttonWidth, buttonHeight, I18n.format("gui.wikizoomer.batch_clear"));
         this.closeButton = new GuiButton(7, col3X, row3Y, buttonWidth, buttonHeight, I18n.format("gui.wikizoomer.close"));
+        this.startButton = new GuiButton(6, startX, row4Y, rowWidth, buttonHeight, I18n.format("gui.wikizoomer.batch_start"));
         this.buttonList.add(this.itemsButton);
         this.buttonList.add(this.entitiesButton);
+        this.buttonList.add(this.gifButton);
         this.buttonList.add(this.backgroundButton);
         this.buttonList.add(this.resolutionButton);
         this.buttonList.add(this.selectAllButton);
@@ -142,6 +147,9 @@ public class GuiBatchExport extends GuiScreen {
             startExport();
         } else if (button.id == 7) {
             Minecraft.getMinecraft().displayGuiScreen(null);
+        } else if (button.id == 9) {
+            exportAnimatedGif = !exportAnimatedGif;
+            updateButtonLabels();
         }
     }
 
@@ -172,8 +180,13 @@ public class GuiBatchExport extends GuiScreen {
     }
 
     private void updateButtonLabels() {
-        this.itemsButton.displayString = I18n.format("gui.wikizoomer.batch_items", exportItems ? "ON" : "OFF");
-        this.entitiesButton.displayString = I18n.format("gui.wikizoomer.batch_entities", exportEntities ? "ON" : "OFF");
+        String onStr = I18n.format("gui.wikizoomer.on");
+        String offStr = I18n.format("gui.wikizoomer.off");
+        this.itemsButton.displayString = I18n.format("gui.wikizoomer.batch_items", exportItems ? onStr : offStr);
+        this.entitiesButton.displayString = I18n.format("gui.wikizoomer.batch_entities", exportEntities ? onStr : offStr);
+        if (this.gifButton != null) {
+            this.gifButton.displayString = I18n.format("gui.wikizoomer.batch_gif", exportAnimatedGif ? onStr : offStr);
+        }
         if (useItemConfig || useEntityConfig) {
             this.backgroundButton.displayString = I18n.format("gui.wikizoomer.background", I18n.format("gui.wikizoomer.configured"));
             this.resolutionButton.displayString = I18n.format("gui.wikizoomer.resolution_configured");
@@ -210,7 +223,7 @@ public class GuiBatchExport extends GuiScreen {
                 if (id == null || !modIds.contains(id.getNamespace())) {
                     continue;
                 }
-                ExportTask task = ExportManager.createItemTask(new ItemStack(item), itemZoom, itemBg, itemSize, true, itemRotX, itemRotY);
+                ExportTask task = ExportManager.createItemTask(new ItemStack(item), itemZoom, itemBg, itemSize, true, itemRotX, itemRotY, !exportAnimatedGif);
                 if (task != null) {
                     tasks.add(task);
                 }

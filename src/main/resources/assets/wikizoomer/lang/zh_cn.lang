@@ -37,3 +37,6 @@ itemGroup.wikizoomer=Wiki Zoomer
 gui.wikizoomer.clear_config=清除配置
 gui.wikizoomer.configured=已配置
 gui.wikizoomer.resolution_configured=分辨率：已配置
+gui.wikizoomer.batch_gif=动态GIF：%s
+gui.wikizoomer.on=开启
+gui.wikizoomer.off=关闭
