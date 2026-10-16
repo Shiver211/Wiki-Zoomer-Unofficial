@@ -12,6 +12,7 @@ tile.wikizoomer.item_zoomer.desc1=按住 Shift 并右键打开渲染
 tile.wikizoomer.entity_zoomer.desc0=使用实体信息右键点击以设置
 tile.wikizoomer.entity_zoomer.desc1=按住 Shift 并右键打开渲染
 gui.wikizoomer.export_png=导出 PNG
+gui.wikizoomer.export_gif=导出 GIF
 gui.wikizoomer.batch_export=批量导出
 gui.wikizoomer.batch_title=批量导出
 gui.wikizoomer.batch_items=物品：%s

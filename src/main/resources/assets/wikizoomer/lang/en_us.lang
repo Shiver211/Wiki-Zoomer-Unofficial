@@ -12,6 +12,7 @@ tile.wikizoomer.item_zoomer.desc1=Shift right click to open render
 tile.wikizoomer.entity_zoomer.desc0=Right click with Entity Info to set
 tile.wikizoomer.entity_zoomer.desc1=Shift right click to open render
 gui.wikizoomer.export_png=Export PNG
+gui.wikizoomer.export_gif=Export GIF
 gui.wikizoomer.batch_export=Batch Export
 gui.wikizoomer.batch_title=Batch Export
 gui.wikizoomer.batch_items=Items: %s

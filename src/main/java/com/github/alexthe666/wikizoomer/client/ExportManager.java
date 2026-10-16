@@ -1,5 +1,8 @@
 package com.github.alexthe666.wikizoomer.client;
 
+import com.github.alexthe666.wikizoomer.ModConfig;
+import com.github.alexthe666.wikizoomer.client.gif.AnimatedGifEncoder;
+import com.github.alexthe666.wikizoomer.client.gif.GifFrame;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.renderer.OpenGlHelper;
@@ -8,6 +11,7 @@ import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.client.renderer.block.model.IBakedModel;
 import net.minecraft.client.renderer.block.model.ItemCameraTransforms;
 import net.minecraft.client.renderer.entity.RenderManager;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.renderer.texture.TextureMap;
 import net.minecraft.client.resources.I18n;
 import net.minecraft.client.shader.Framebuffer;
@@ -32,8 +36,16 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.IntBuffer;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @SideOnly(Side.CLIENT)
 public class ExportManager {
@@ -45,8 +57,19 @@ public class ExportManager {
     private static final Queue<ExportTask> QUEUE = new ArrayDeque<>();
     private static Framebuffer framebuffer;
     private static int batchRemaining = 0;
+    private static boolean isBatchRunning = false;
     private static IntBuffer pixelBuffer;
     private static int[] pixelValues;
+
+    private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(
+            Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors() / 2)),
+            r -> {
+                Thread t = new Thread(r, "WikiZoomer-ExportWorker");
+                t.setDaemon(true);
+                return t;
+            }
+    );
+    private static final AtomicInteger ACTIVE_TASKS = new AtomicInteger(0);
 
     public static float getDefaultZoom() {
         return DEFAULT_ZOOM;
@@ -58,6 +81,10 @@ public class ExportManager {
 
     public static int[] getExportSizes() {
         return EXPORT_SIZES.clone();
+    }
+
+    public static boolean isItemAnimated(ItemStack stack) {
+        return TextureAnimationHelper.isItemAnimated(stack);
     }
 
     public static void enqueue(ExportTask task) {
@@ -72,14 +99,19 @@ public class ExportManager {
         }
         QUEUE.addAll(tasks);
         batchRemaining += tasks.size();
+        isBatchRunning = true;
         sendChat(I18n.format("gui.wikizoomer.batch_started", tasks.size()));
     }
 
     public static ExportTask createItemTask(ItemStack stack, float zoomPercent, ExportTask.Background background, int exportSize, boolean isBatch) {
-        return createItemTask(stack, zoomPercent, background, exportSize, isBatch, 0F, 0F);
+        return createItemTask(stack, zoomPercent, background, exportSize, isBatch, 0F, 0F, false);
     }
 
     public static ExportTask createItemTask(ItemStack stack, float zoomPercent, ExportTask.Background background, int exportSize, boolean isBatch, float rotX, float rotY) {
+        return createItemTask(stack, zoomPercent, background, exportSize, isBatch, rotX, rotY, false);
+    }
+
+    public static ExportTask createItemTask(ItemStack stack, float zoomPercent, ExportTask.Background background, int exportSize, boolean isBatch, float rotX, float rotY, boolean forcePng) {
         if (stack == null || stack.isEmpty()) {
             return null;
         }
@@ -87,8 +119,9 @@ public class ExportManager {
         if (id == null) {
             return null;
         }
-        File output = getOutputFile(id);
-        return ExportTask.forItem(stack, output, background, isBatch, zoomPercent, exportSize, rotX, rotY);
+        boolean isGif = !forcePng && ModConfig.exportAnimatedTexturesAsGif && TextureAnimationHelper.isItemAnimated(stack);
+        File output = getOutputFile(id, isGif);
+        return ExportTask.forItem(stack, output, background, isBatch, zoomPercent, exportSize, rotX, rotY, isGif);
     }
 
     public static ExportTask createEntityTask(Entity entity, float zoomPercent, ExportTask.Background background, int exportSize, boolean isBatch, int offsetX, int offsetY) {
@@ -103,7 +136,7 @@ public class ExportManager {
         if (id == null) {
             return null;
         }
-        File output = getOutputFile(id);
+        File output = getOutputFile(id, false);
         return ExportTask.forEntity(entity, output, background, isBatch, zoomPercent, exportSize, rotX, rotY, offsetX, offsetY);
     }
 
@@ -115,12 +148,13 @@ public class ExportManager {
         if (entityId == null) {
             return null;
         }
-        File output = getOutputFile(entityId);
+        File output = getOutputFile(entityId, false);
         return ExportTask.forEntityId(entityId, output, background, isBatch, zoomPercent, exportSize, rotX, rotY, offsetX, offsetY);
     }
 
     public static void tick() {
         if (QUEUE.isEmpty()) {
+            checkBatchFinished();
             return;
         }
         Minecraft mc = Minecraft.getMinecraft();
@@ -134,20 +168,25 @@ public class ExportManager {
         boolean success = renderTask(mc, task);
         if (task.isBatch) {
             batchRemaining--;
-            if (batchRemaining <= 0) {
-                batchRemaining = 0;
-                sendChat(I18n.format("gui.wikizoomer.batch_done"));
-            }
-        } else if (success) {
-            sendChat(I18n.format("gui.wikizoomer.export_done", task.outputFile.getName()));
+            checkBatchFinished();
+        } else if (!success) {
+            // Task failed
         }
     }
 
-    private static File getOutputFile(ResourceLocation id) {
+    private static void checkBatchFinished() {
+        if (isBatchRunning && batchRemaining <= 0 && QUEUE.isEmpty() && ACTIVE_TASKS.get() == 0) {
+            isBatchRunning = false;
+            batchRemaining = 0;
+            sendChat(I18n.format("gui.wikizoomer.batch_done"));
+        }
+    }
+
+    private static File getOutputFile(ResourceLocation id, boolean isGif) {
         Minecraft mc = Minecraft.getMinecraft();
         File baseDir = new File(mc.gameDir, "wiki zoomer");
         File modDir = new File(baseDir, id.getNamespace());
-        return new File(modDir, id.getPath() + ".png");
+        return new File(modDir, id.getPath() + (isGif ? ".gif" : ".png"));
     }
 
     private static boolean renderTask(Minecraft mc, ExportTask task) {
@@ -161,6 +200,14 @@ public class ExportManager {
                 return false;
             }
         }
+
+        if (task.type == ExportTask.Type.ITEM && task.isGif) {
+            if (renderItemGifTask(mc, task)) {
+                return true;
+            }
+            // fallback to single frame render if gif rendering could not proceed
+        }
+
         int exportSize = task.exportSize;
         ensureFramebuffer(exportSize);
         File output = task.outputFile;
@@ -200,7 +247,21 @@ public class ExportManager {
             }
             boolean transparent = task.background == ExportTask.Background.TRANSPARENT;
             BufferedImage image = readFramebuffer(exportSize, exportSize, framebuffer, transparent);
-            ImageIO.write(image, "png", output);
+
+            ACTIVE_TASKS.incrementAndGet();
+            EXECUTOR.submit(() -> {
+                try {
+                    ImageIO.write(image, "png", output);
+                    if (!task.isBatch) {
+                        sendChat(I18n.format("gui.wikizoomer.export_done", output.getName()));
+                    }
+                } catch (Throwable t) {
+                    LOGGER.warn("Failed to export PNG image", t);
+                } finally {
+                    ACTIVE_TASKS.decrementAndGet();
+                    checkBatchFinished();
+                }
+            });
             success = true;
         } catch (Exception e) {
             LOGGER.warn("Failed to export image", e);
@@ -216,6 +277,155 @@ public class ExportManager {
             GL11.glViewport(0, 0, prevWidth, prevHeight);
         }
         return success;
+    }
+
+    private static boolean renderItemGifTask(Minecraft mc, ExportTask task) {
+        Set<TextureAtlasSprite> animatedSprites = TextureAnimationHelper.getAnimatedSprites(task.itemStack);
+        if (animatedSprites.isEmpty()) {
+            return false;
+        }
+        int totalTicks = TextureAnimationHelper.getTotalPeriodTicks(animatedSprites);
+        if (totalTicks <= 1) {
+            return false;
+        }
+
+        int exportSize = task.exportSize;
+        ensureFramebuffer(exportSize);
+        File output = task.outputFile;
+        File parent = output.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            LOGGER.warn("Could not create export directory: {}", parent.getAbsolutePath());
+        }
+
+        int prevWidth = mc.displayWidth;
+        int prevHeight = mc.displayHeight;
+        boolean pushedMatrices = false;
+
+        Map<TextureAtlasSprite, Integer> savedFrameCounters = new HashMap<>();
+        Map<TextureAtlasSprite, Integer> savedTickCounters = new HashMap<>();
+        for (TextureAtlasSprite sprite : animatedSprites) {
+            savedFrameCounters.put(sprite, TextureAnimationHelper.getFrameCounter(sprite));
+            savedTickCounters.put(sprite, TextureAnimationHelper.getTickCounter(sprite));
+        }
+
+        List<GifFrame> frames = new ArrayList<>();
+        int[] prevPixels = null;
+        GifFrame currentFrame = null;
+
+        try {
+            framebuffer.bindFramebuffer(true);
+            GL11.glViewport(0, 0, exportSize, exportSize);
+
+            // Reset each sprite to start of animation and upload initial frame
+            mc.getTextureManager().bindTexture(TextureMap.LOCATION_BLOCKS_TEXTURE);
+            for (TextureAtlasSprite sprite : animatedSprites) {
+                TextureAnimationHelper.setFrameCounter(sprite, 0);
+                TextureAnimationHelper.setTickCounter(sprite, 0);
+                TextureAnimationHelper.uploadInitialFrame(sprite);
+            }
+
+            for (int tick = 0; tick < totalTicks; tick++) {
+                if (task.background == ExportTask.Background.TRANSPARENT) {
+                    GlStateManager.clearColor(0.0F, 0.0F, 0.0F, 0.0F);
+                } else {
+                    GlStateManager.clearColor(0.298F, 1.0F, 0.0F, 1.0F);
+                }
+                GlStateManager.clear(GL11.GL_COLOR_BUFFER_BIT | GL11.GL_DEPTH_BUFFER_BIT);
+                GlStateManager.disableCull();
+                GlStateManager.enableDepth();
+
+                GlStateManager.matrixMode(GL11.GL_PROJECTION);
+                GlStateManager.pushMatrix();
+                GlStateManager.loadIdentity();
+                GlStateManager.ortho(0.0D, exportSize, exportSize, 0.0D, -10000.0D, 10000.0D);
+                GlStateManager.matrixMode(GL11.GL_MODELVIEW);
+                GlStateManager.pushMatrix();
+                GlStateManager.loadIdentity();
+                GlStateManager.translate(0.0F, 0.0F, -2000.0F);
+                pushedMatrices = true;
+                GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
+
+                renderItem(task.itemStack, task.zoomPercent, exportSize, task.rotX, task.rotY);
+
+                GlStateManager.popMatrix();
+                GlStateManager.matrixMode(GL11.GL_PROJECTION);
+                GlStateManager.popMatrix();
+                GlStateManager.matrixMode(GL11.GL_MODELVIEW);
+                pushedMatrices = false;
+
+                boolean transparent = task.background == ExportTask.Background.TRANSPARENT;
+                BufferedImage image = readFramebuffer(exportSize, exportSize, framebuffer, transparent);
+
+                if (prevPixels != null && Arrays.equals(pixelValues, prevPixels) && currentFrame != null) {
+                    currentFrame.delayCentiseconds += 5; // 5cs = 50ms (1 tick)
+                } else {
+                    prevPixels = pixelValues.clone();
+                    currentFrame = new GifFrame(image, 5);
+                    frames.add(currentFrame);
+                }
+
+                // Advance animation by 1 tick
+                mc.getTextureManager().bindTexture(TextureMap.LOCATION_BLOCKS_TEXTURE);
+                for (TextureAtlasSprite sprite : animatedSprites) {
+                    sprite.updateAnimation();
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Failed to render item GIF frames", e);
+            return false;
+        } finally {
+            if (pushedMatrices) {
+                GlStateManager.popMatrix();
+                GlStateManager.matrixMode(GL11.GL_PROJECTION);
+                GlStateManager.popMatrix();
+                GlStateManager.matrixMode(GL11.GL_MODELVIEW);
+            }
+            framebuffer.unbindFramebuffer();
+            mc.getFramebuffer().bindFramebuffer(true);
+            GL11.glViewport(0, 0, prevWidth, prevHeight);
+
+            // Restore animated sprites to original state
+            mc.getTextureManager().bindTexture(TextureMap.LOCATION_BLOCKS_TEXTURE);
+            for (TextureAtlasSprite sprite : animatedSprites) {
+                int fc = savedFrameCounters.get(sprite);
+                int tc = savedTickCounters.get(sprite);
+                TextureAnimationHelper.setFrameCounter(sprite, fc);
+                TextureAnimationHelper.setTickCounter(sprite, tc);
+                TextureAnimationHelper.uploadFrame(sprite, fc);
+            }
+        }
+
+        if (frames.isEmpty()) {
+            return false;
+        }
+
+        final List<GifFrame> capturedFrames = new ArrayList<>(frames);
+        final boolean isTransparent = task.background == ExportTask.Background.TRANSPARENT;
+        final boolean isBatch = task.isBatch;
+
+        ACTIVE_TASKS.incrementAndGet();
+        EXECUTOR.submit(() -> {
+            try {
+                AnimatedGifEncoder encoder = new AnimatedGifEncoder();
+                encoder.setTransparent(isTransparent);
+                encoder.setRepeat(0);
+                encoder.start(output.getAbsolutePath());
+                for (GifFrame f : capturedFrames) {
+                    encoder.addFrame(f.image, f.delayCentiseconds);
+                }
+                encoder.finish();
+                if (!isBatch) {
+                    sendChat(I18n.format("gui.wikizoomer.export_done", output.getName()));
+                }
+            } catch (Throwable t) {
+                LOGGER.warn("Failed to encode GIF image: " + output.getAbsolutePath(), t);
+            } finally {
+                ACTIVE_TASKS.decrementAndGet();
+                checkBatchFinished();
+            }
+        });
+
+        return true;
     }
 
     private static void ensureFramebuffer(int exportSize) {
@@ -315,8 +525,12 @@ public class ExportManager {
 
     private static void sendChat(String message) {
         Minecraft mc = Minecraft.getMinecraft();
-        if (mc.player != null) {
-            mc.player.sendMessage(new TextComponentString(message));
+        if (mc != null) {
+            mc.addScheduledTask(() -> {
+                if (mc.player != null) {
+                    mc.player.sendMessage(new TextComponentString(message));
+                }
+            });
         }
     }
 

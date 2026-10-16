@@ -25,6 +25,7 @@ import net.minecraftforge.fml.relauncher.SideOnly;
 import java.io.IOException;
 import java.util.List;
 
+import com.github.alexthe666.wikizoomer.ModConfig;
 import com.github.alexthe666.wikizoomer.client.ExportManager;
 import com.github.alexthe666.wikizoomer.client.ExportTask;
 import com.github.alexthe666.wikizoomer.client.GuiBatchExport;
@@ -112,7 +113,7 @@ public class GuiItemZoomer extends GuiScreen {
         slider.height = buttonHeight;
         this.addButton(slider);
         this.addButton(new GuiButton(1, col2X, row1Y, buttonWidth, buttonHeight, backgroundLabel));
-        this.addButton(new GuiButton(3, col3X, row1Y, buttonWidth, buttonHeight, exportPng));
+        this.addButton(new GuiButton(3, col3X, row1Y, buttonWidth, buttonHeight, getExportButtonText()));
         this.addButton(new GuiButton(5, col1X, row2Y, buttonWidth, buttonHeight, resolutionLabel));
         this.addButton(new GuiButton(4, col2X, row2Y, buttonWidth, buttonHeight, batchExport));
         this.addButton(new GuiButton(2, col3X, row2Y, buttonWidth, buttonHeight, exit));
@@ -120,6 +121,27 @@ public class GuiItemZoomer extends GuiScreen {
         for (GuiButton button : this.buttonList) {
             button.enabled = true;
         }
+    }
+
+    private String getExportButtonText() {
+        ItemStack stack = zoomerBase != null ? zoomerBase.getStackInSlot(0) : ItemStack.EMPTY;
+        boolean animated = ModConfig.exportAnimatedTexturesAsGif && ExportManager.isItemAnimated(stack);
+        if (animated) {
+            if (isShiftKeyDown()) {
+                return I18n.format("gui.wikizoomer.export_png");
+            }
+            return I18n.format("gui.wikizoomer.export_gif");
+        }
+        return I18n.format("gui.wikizoomer.export_png");
+    }
+
+    private GuiButton getButtonById(int id) {
+        for (GuiButton btn : this.buttonList) {
+            if (btn.id == id) {
+                return btn;
+            }
+        }
+        return null;
     }
 
     @Override
@@ -134,7 +156,9 @@ public class GuiItemZoomer extends GuiScreen {
         }
         if (button.enabled && button.id == 3) {
             saveConfig();
-            ExportTask task = ExportManager.createItemTask(zoomerBase.getStackInSlot(0), sliderValue, background, getExportSize(), false, rotX, rotY);
+            ItemStack stack = zoomerBase.getStackInSlot(0);
+            boolean forcePng = isShiftKeyDown();
+            ExportTask task = ExportManager.createItemTask(stack, sliderValue, background, getExportSize(), false, rotX, rotY, forcePng);
             if (task == null) {
                 if (Minecraft.getMinecraft().player != null) {
                     Minecraft.getMinecraft().player.sendMessage(new TextComponentString(I18n.format("gui.wikizoomer.export_no_item")));
@@ -219,6 +243,11 @@ public class GuiItemZoomer extends GuiScreen {
         drawRect(boxX, boxY, boxX + 1, boxY + boxSize, 0xFFFF0000);
         drawRect(boxX + boxSize - 1, boxY, boxX + boxSize, boxY + boxSize, 0xFFFF0000);
         GlStateManager.enableDepth();
+
+        GuiButton exportBtn = getButtonById(3);
+        if (exportBtn != null) {
+            exportBtn.displayString = getExportButtonText();
+        }
 
         super.drawScreen(mouseX, mouseY, partialTicks);
     }

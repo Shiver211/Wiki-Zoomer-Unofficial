@@ -30,8 +30,9 @@ public class ExportTask {
     public final float rotY;
     public final int offsetX;
     public final int offsetY;
+    public final boolean isGif;
 
-    private ExportTask(Type type, ItemStack itemStack, Entity entity, ResourceLocation entityId, File outputFile, Background background, boolean isBatch, float zoomPercent, int exportSize, float rotX, float rotY, int offsetX, int offsetY) {
+    private ExportTask(Type type, ItemStack itemStack, Entity entity, ResourceLocation entityId, File outputFile, Background background, boolean isBatch, float zoomPercent, int exportSize, float rotX, float rotY, int offsetX, int offsetY, boolean isGif) {
         this.type = type;
         this.itemStack = itemStack;
         this.entity = entity;
@@ -45,16 +46,21 @@ public class ExportTask {
         this.rotY = rotY;
         this.offsetX = offsetX;
         this.offsetY = offsetY;
+        this.isGif = isGif;
     }
 
     public static ExportTask forItem(ItemStack stack, File outputFile, Background background, boolean isBatch, float zoomPercent, int exportSize) {
-        return forItem(stack, outputFile, background, isBatch, zoomPercent, exportSize, 0F, 0F);
+        return forItem(stack, outputFile, background, isBatch, zoomPercent, exportSize, 0F, 0F, false);
     }
 
     public static ExportTask forItem(ItemStack stack, File outputFile, Background background, boolean isBatch, float zoomPercent, int exportSize, float rotX, float rotY) {
+        return forItem(stack, outputFile, background, isBatch, zoomPercent, exportSize, rotX, rotY, false);
+    }
+
+    public static ExportTask forItem(ItemStack stack, File outputFile, Background background, boolean isBatch, float zoomPercent, int exportSize, float rotX, float rotY, boolean isGif) {
         ItemStack copy = stack.copy();
         copy.setCount(1);
-        return new ExportTask(Type.ITEM, copy, null, null, outputFile, background, isBatch, zoomPercent, exportSize, rotX, rotY, 0, 0);
+        return new ExportTask(Type.ITEM, copy, null, null, outputFile, background, isBatch, zoomPercent, exportSize, rotX, rotY, 0, 0, isGif);
     }
 
     public static ExportTask forEntity(Entity entity, File outputFile, Background background, boolean isBatch, float zoomPercent, int exportSize, int offsetX, int offsetY) {
@@ -62,7 +68,7 @@ public class ExportTask {
     }
 
     public static ExportTask forEntity(Entity entity, File outputFile, Background background, boolean isBatch, float zoomPercent, int exportSize, float rotX, float rotY, int offsetX, int offsetY) {
-        return new ExportTask(Type.ENTITY, ItemStack.EMPTY, entity, null, outputFile, background, isBatch, zoomPercent, exportSize, rotX, rotY, offsetX, offsetY);
+        return new ExportTask(Type.ENTITY, ItemStack.EMPTY, entity, null, outputFile, background, isBatch, zoomPercent, exportSize, rotX, rotY, offsetX, offsetY, false);
     }
 
     public static ExportTask forEntityId(ResourceLocation entityId, File outputFile, Background background, boolean isBatch, float zoomPercent, int exportSize, int offsetX, int offsetY) {
@@ -70,6 +76,6 @@ public class ExportTask {
     }
 
     public static ExportTask forEntityId(ResourceLocation entityId, File outputFile, Background background, boolean isBatch, float zoomPercent, int exportSize, float rotX, float rotY, int offsetX, int offsetY) {
-        return new ExportTask(Type.ENTITY, ItemStack.EMPTY, null, entityId, outputFile, background, isBatch, zoomPercent, exportSize, rotX, rotY, offsetX, offsetY);
+        return new ExportTask(Type.ENTITY, ItemStack.EMPTY, null, entityId, outputFile, background, isBatch, zoomPercent, exportSize, rotX, rotY, offsetX, offsetY, false);
     }
 }
