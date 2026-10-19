@@ -53,7 +53,7 @@ public class ExportManager {
     private static final int DEFAULT_EXPORT_SIZE = 512;
     private static final int[] EXPORT_SIZES = new int[]{64, 128, 256, 512, 1024};
     private static final float DEFAULT_ZOOM = 100F;
-    private static final float ITEM_BASE_SCALE = 12F;
+    public static final float ITEM_BASE_SCALE = 16F;
     private static final Queue<ExportTask> QUEUE = new ArrayDeque<>();
     private static Framebuffer framebuffer;
     private static int batchRemaining = 0;

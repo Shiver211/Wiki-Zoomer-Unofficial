@@ -209,7 +209,7 @@ public class GuiItemZoomer extends GuiScreen {
         int j = (this.height) / 2;
         ItemStack stack = zoomerBase.getStackInSlot(0);
         int boxSize = Math.min(this.width, this.height) / 2;
-        float displayScale = (float)boxSize / getExportSize() * sliderValue / 100F * 12F;
+        float displayScale = (float)boxSize / getExportSize() * sliderValue / 100F * ExportManager.ITEM_BASE_SCALE;
         if (!stack.isEmpty()) {
             // Set up wide-depth orthographic projection like ExportManager
             GlStateManager.matrixMode(org.lwjgl.opengl.GL11.GL_PROJECTION);
