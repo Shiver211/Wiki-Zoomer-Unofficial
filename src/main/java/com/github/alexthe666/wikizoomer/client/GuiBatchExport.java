@@ -223,9 +223,13 @@ public class GuiBatchExport extends GuiScreen {
                 if (id == null || !modIds.contains(id.getNamespace())) {
                     continue;
                 }
-                ExportTask task = ExportManager.createItemTask(new ItemStack(item), itemZoom, itemBg, itemSize, true, itemRotX, itemRotY, !exportAnimatedGif);
-                if (task != null) {
-                    tasks.add(task);
+                List<ItemStack> subItems = ExportManager.collectSubItems(item);
+                boolean hasMultiple = subItems.size() > 1;
+                for (ItemStack subStack : subItems) {
+                    ExportTask task = ExportManager.createItemTask(subStack, itemZoom, itemBg, itemSize, true, itemRotX, itemRotY, !exportAnimatedGif, hasMultiple);
+                    if (task != null) {
+                        tasks.add(task);
+                    }
                 }
             }
         }

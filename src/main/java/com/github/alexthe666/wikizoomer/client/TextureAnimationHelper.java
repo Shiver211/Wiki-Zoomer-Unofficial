@@ -209,7 +209,7 @@ public class TextureAnimationHelper {
                 Block block = ((ItemBlock) stack.getItem()).getBlock();
                 IBlockState state = null;
                 try {
-                    state = block.getStateFromMeta(stack.getMetadata());
+                    state = block.getStateFromMeta(ExportManager.getEffectiveMetadata(stack));
                 } catch (Throwable ignored) {}
                 if (state == null) {
                     try {

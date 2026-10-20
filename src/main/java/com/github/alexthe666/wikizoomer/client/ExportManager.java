@@ -16,11 +16,14 @@ import net.minecraft.client.renderer.texture.TextureMap;
 import net.minecraft.client.resources.I18n;
 import net.minecraft.client.shader.Framebuffer;
 import net.minecraft.client.renderer.texture.TextureUtil;
+import net.minecraft.creativetab.CreativeTabs;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityList;
 import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemBlock;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.NonNullList;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.text.TextComponentString;
 import net.minecraftforge.client.ForgeHooksClient;
@@ -38,7 +41,9 @@ import java.nio.IntBuffer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
@@ -103,15 +108,119 @@ public class ExportManager {
         sendChat(I18n.format("gui.wikizoomer.batch_started", tasks.size()));
     }
 
+    public static int getEffectiveMetadata(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return 0;
+        }
+        if (stack.isItemStackDamageable()) {
+            return 0;
+        }
+        int damage = stack.getItemDamage();
+        if (damage < 0 || damage == Short.MAX_VALUE || damage == 32767) {
+            return 0;
+        }
+        return damage;
+    }
+
+    public static List<ItemStack> collectSubItems(Item item) {
+        if (item == null || item == net.minecraft.init.Items.AIR) {
+            return Collections.emptyList();
+        }
+        NonNullList<ItemStack> rawList = NonNullList.create();
+        try {
+            CreativeTabs[] tabs = item.getCreativeTabs();
+            if (tabs != null && tabs.length > 0) {
+                for (CreativeTabs tab : tabs) {
+                    if (tab != null) {
+                        item.getSubItems(tab, rawList);
+                    }
+                }
+            } else if (item.getCreativeTab() != null) {
+                item.getSubItems(item.getCreativeTab(), rawList);
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("Failed to getSubItems for item: {}", item.getRegistryName(), t);
+        }
+
+        if (rawList.isEmpty()) {
+            try {
+                item.getSubItems(CreativeTabs.SEARCH, rawList);
+            } catch (Throwable t) {
+                LOGGER.warn("Failed to getSubItems (SEARCH) for item: {}", item.getRegistryName(), t);
+            }
+        }
+
+        if (rawList.isEmpty()) {
+            rawList.add(new ItemStack(item));
+        }
+
+        List<ItemStack> result = new ArrayList<>();
+        Set<Integer> seenMeta = new HashSet<>();
+        for (ItemStack stack : rawList) {
+            if (stack == null || stack.isEmpty()) {
+                continue;
+            }
+            int meta = getEffectiveMetadata(stack);
+            if (seenMeta.add(meta)) {
+                result.add(stack);
+            }
+        }
+
+        if (result.isEmpty()) {
+            result.add(new ItemStack(item));
+        }
+        return result;
+    }
+
+    public static boolean hasSubtypes(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        if (stack.isItemStackDamageable()) {
+            return false;
+        }
+        if (stack.getItemDamage() > 0) {
+            return true;
+        }
+        if (stack.getHasSubtypes()) {
+            return true;
+        }
+        return collectSubItems(stack.getItem()).size() > 1;
+    }
+
+    public static File getItemOutputFile(ItemStack stack, boolean isGif, boolean hasMultipleVariants) {
+        if (stack == null || stack.isEmpty()) {
+            return null;
+        }
+        ResourceLocation id = stack.getItem().getRegistryName();
+        if (id == null) {
+            return null;
+        }
+        Minecraft mc = Minecraft.getMinecraft();
+        File baseDir = new File(mc.gameDir, "wiki zoomer");
+        File modDir = new File(baseDir, id.getNamespace());
+        int meta = getEffectiveMetadata(stack);
+        boolean hasSubtypes = hasMultipleVariants || hasSubtypes(stack);
+        String name = id.getPath();
+        if (meta > 0 || (meta == 0 && hasSubtypes && ModConfig.appendMetadataSuffixForSubtypes)) {
+            name = name + "_" + meta;
+        }
+        return new File(modDir, name + (isGif ? ".gif" : ".png"));
+    }
+
     public static ExportTask createItemTask(ItemStack stack, float zoomPercent, ExportTask.Background background, int exportSize, boolean isBatch) {
-        return createItemTask(stack, zoomPercent, background, exportSize, isBatch, 0F, 0F, false);
+        return createItemTask(stack, zoomPercent, background, exportSize, isBatch, 0F, 0F, false, false);
     }
 
     public static ExportTask createItemTask(ItemStack stack, float zoomPercent, ExportTask.Background background, int exportSize, boolean isBatch, float rotX, float rotY) {
-        return createItemTask(stack, zoomPercent, background, exportSize, isBatch, rotX, rotY, false);
+        return createItemTask(stack, zoomPercent, background, exportSize, isBatch, rotX, rotY, false, false);
     }
 
     public static ExportTask createItemTask(ItemStack stack, float zoomPercent, ExportTask.Background background, int exportSize, boolean isBatch, float rotX, float rotY, boolean forcePng) {
+        return createItemTask(stack, zoomPercent, background, exportSize, isBatch, rotX, rotY, forcePng, false);
+    }
+
+    public static ExportTask createItemTask(ItemStack stack, float zoomPercent, ExportTask.Background background, int exportSize, boolean isBatch, float rotX, float rotY, boolean forcePng, boolean hasMultipleVariants) {
         if (stack == null || stack.isEmpty()) {
             return null;
         }
@@ -120,7 +229,7 @@ public class ExportManager {
             return null;
         }
         boolean isGif = !forcePng && ModConfig.exportAnimatedTexturesAsGif && TextureAnimationHelper.isItemAnimated(stack);
-        File output = getOutputFile(id, isGif);
+        File output = getItemOutputFile(stack, isGif, hasMultipleVariants);
         return ExportTask.forItem(stack, output, background, isBatch, zoomPercent, exportSize, rotX, rotY, isGif);
     }
 
