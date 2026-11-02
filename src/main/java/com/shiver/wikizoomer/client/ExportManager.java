@@ -370,7 +370,7 @@ public class ExportManager {
                 0.0F, 1.0F, 1.0F, 0.0F, -1, guiGraphics.peekScissorStack()));
     }
 
-    private static boolean renderTask(Minecraft mc, ExportTask task) {
+    private static boolean renderTask(Minecraft mc, ExportTask task) throws IOException {
         if (task.type == ExportTask.Type.ITEM && task.itemStack.isEmpty()) return false;
         Entity entity = task.type == ExportTask.Type.ENTITY ? resolveEntity(mc, task) : null;
         if (task.type == ExportTask.Type.ENTITY && entity == null) return false;
@@ -382,15 +382,11 @@ public class ExportManager {
         boolean transparent = task.background == ExportTask.Background.TRANSPARENT;
         if (task.isGif) {
             List<CompletableFuture<BufferedImage>> images = captureGifFrames(mc, task);
-            if (!images.isEmpty()) {
-                File gifOutput = output;
-                CompletableFuture.allOf(images.toArray(CompletableFuture[]::new)).whenComplete((unused, error) -> {
-                    if (error != null) reportReadFailure(task, gifOutput, error);
-                    else writeAsync(task, gifOutput, () -> writeGif(mergeGifFrames(images), transparent, gifOutput));
-                });
-                return true;
-            }
-            output = new File(output.getParentFile(), output.getName().replaceFirst("\\.gif$", ".png"));
+            CompletableFuture.allOf(images.toArray(CompletableFuture[]::new)).whenComplete((unused, error) -> {
+                if (error != null) reportReadFailure(task, output, error);
+                else writeAsync(task, output, () -> writeGif(mergeGifFrames(images), transparent, output));
+            });
+            return true;
         }
         renderPreviewToTarget(mc, task.type, task.itemStack, entity, task.zoomPercent, task.background,
                 task.exportSize, task.rotX, task.rotY, task.offsetX, task.offsetY);
@@ -402,19 +398,15 @@ public class ExportManager {
         return true;
     }
 
-    private static List<CompletableFuture<BufferedImage>> captureGifFrames(Minecraft mc, ExportTask task) {
+    private static List<CompletableFuture<BufferedImage>> captureGifFrames(Minecraft mc, ExportTask task) throws IOException {
         List<CompletableFuture<BufferedImage>> images = new ArrayList<>();
         try (TextureAnimationHelper.Capture capture = TextureAnimationHelper.beginCapture(task.itemStack)) {
-            if (capture.periodTicks() <= 1) return images;
             for (int tick = 0; tick < capture.periodTicks(); tick++) {
                 renderPreviewToTarget(mc, task.type, task.itemStack, null, task.zoomPercent, task.background,
                         task.exportSize, task.rotX, task.rotY, 0.0F, 0.0F);
                 images.add(readFrame(task.exportSize, task.background == ExportTask.Background.TRANSPARENT));
                 capture.advance();
             }
-        } catch (Exception e) {
-            LOGGER.warn("Failed to capture animated texture; exporting PNG instead", e);
-            images.clear();
         }
         return images;
     }

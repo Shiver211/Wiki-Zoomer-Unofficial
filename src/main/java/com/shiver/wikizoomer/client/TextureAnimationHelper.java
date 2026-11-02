@@ -134,7 +134,9 @@ public class TextureAnimationHelper {
     private static class SpriteAnimation implements AutoCloseable {
         private final TextureAtlasSprite sprite;
         private final GpuTexture atlas;
-        private final GpuTexture savedTexture;
+        private final GpuBuffer[] savedMipPixels;
+        private final int paddedWidth;
+        private final int paddedHeight;
         private final GpuTextureView[] atlasMipViews;
         private final GpuBuffer uniforms;
         private final SpriteContents.AnimationState state;
@@ -145,14 +147,19 @@ public class TextureAnimationHelper {
             this.atlas = Minecraft.getInstance().getTextureManager().getTexture(sprite.atlasLocation()).getTexture();
             int levels = atlas.getMipLevels();
             int padding = Math.round(sprite.getU0() * atlas.getWidth(0)) - sprite.getX();
-            this.savedTexture = device.createTexture("wikizoomer saved sprite", GpuTexture.USAGE_COPY_SRC | GpuTexture.USAGE_COPY_DST,
-                    atlas.getFormat(), sprite.contents().width() + padding * 2, sprite.contents().height() + padding * 2, 1, levels);
+            this.paddedWidth = sprite.contents().width() + padding * 2;
+            this.paddedHeight = sprite.contents().height() + padding * 2;
+            this.savedMipPixels = new GpuBuffer[levels];
             this.atlasMipViews = new GpuTextureView[levels];
             CommandEncoder encoder = device.createCommandEncoder();
-            // 图集包含材质边缘 padding，各级 mip 一并备份和恢复。
+            // 26.2 的 OpenGL 纹理间复制忽略 mipLevel，改用缓冲区逐层保存含 padding 的像素。
             for (int level = 0; level < levels; level++) {
-                encoder.copyTextureToTexture(atlas, savedTexture, level, 0, 0, sprite.getX() >> level, sprite.getY() >> level,
-                        savedTexture.getWidth(level), savedTexture.getHeight(level));
+                int width = paddedWidth >> level;
+                int height = paddedHeight >> level;
+                savedMipPixels[level] = device.createBuffer(() -> "wikizoomer saved sprite pixels",
+                        GpuBuffer.USAGE_COPY_SRC | GpuBuffer.USAGE_COPY_DST, (long) width * height * atlas.getFormat().blockSize());
+                encoder.copyTextureToBuffer(atlas, savedMipPixels[level], 0L, () -> {}, level,
+                        sprite.getX() >> level, sprite.getY() >> level, width, height);
                 atlasMipViews[level] = device.createTextureView(atlas, level, 1);
             }
             int uniformSize = Mth.roundToward(SpriteContents.UBO_SIZE, device.getDeviceInfo().limits().minUniformOffsetAlignment());
@@ -172,6 +179,7 @@ public class TextureAnimationHelper {
             CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
             for (int level = 0; level < atlasMipViews.length; level++) {
                 try (RenderPass pass = encoder.createRenderPass(() -> "wikizoomer sprite animation", atlasMipViews[level], Optional.empty())) {
+                    RenderSystem.bindDefaultUniforms(pass);
                     state.drawToAtlas(pass, state.getDrawUbo(level));
                 }
             }
@@ -181,13 +189,15 @@ public class TextureAnimationHelper {
         public void close() {
             CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
             for (int level = 0; level < atlasMipViews.length; level++) {
-                encoder.copyTextureToTexture(savedTexture, atlas, level, sprite.getX() >> level, sprite.getY() >> level, 0, 0,
-                        savedTexture.getWidth(level), savedTexture.getHeight(level));
+                int width = paddedWidth >> level;
+                int height = paddedHeight >> level;
+                encoder.copyBufferToTexture(savedMipPixels[level].slice(), 0, 0, width, height, atlas,
+                        sprite.getX() >> level, sprite.getY() >> level, width, height, level, 0);
+                savedMipPixels[level].close();
                 atlasMipViews[level].close();
             }
             state.close();
             uniforms.close();
-            savedTexture.close();
         }
     }
 }
