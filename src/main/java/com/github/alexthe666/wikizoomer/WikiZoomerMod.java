@@ -17,6 +17,7 @@ public class WikiZoomerMod {
     public static CommonProxy PROXY = DistExecutor.runForDist(() -> ClientProxy::new, () -> CommonProxy::new);
 
     public WikiZoomerMod(FMLJavaModLoadingContext context) {
+        context.registerConfig(net.minecraftforge.fml.config.ModConfig.Type.CLIENT, ModConfig.SPEC);
         final IEventBus modEventBus = context.getModEventBus();
         modEventBus.addListener(this::setup);
         MinecraftForge.EVENT_BUS.register(this);

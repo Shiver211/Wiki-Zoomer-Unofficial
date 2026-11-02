@@ -1,5 +1,6 @@
 package com.github.alexthe666.wikizoomer.client;
 
+import com.github.alexthe666.wikizoomer.ModConfig;
 import com.github.alexthe666.wikizoomer.tileentity.TileEntityZoomerBase;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
@@ -33,6 +34,7 @@ public class GuiItemZoomer extends Screen {
     private float rotX = 0F;
     private float rotY = 0F;
     private ForgeSlider zoomSlider;
+    private Button exportButton;
 
     public GuiItemZoomer(TileEntityZoomerBase zoomerBase) {
         super(Component.translatable("item_zoomer"));
@@ -52,7 +54,6 @@ public class GuiItemZoomer extends Screen {
         int j = (this.height - 166) / 2;
         MutableComponent exit = Component.translatable("gui.wikizoomer.close");
         MutableComponent backgroundLabel = Component.translatable("gui.wikizoomer.background", getBackgroundLabel());
-        MutableComponent export = Component.translatable("gui.wikizoomer.export_png");
         MutableComponent batchExport = Component.translatable("gui.wikizoomer.batch_export");
         MutableComponent clearConfig = Component.translatable("gui.wikizoomer.clear_config");
         MutableComponent resolutionLabel = Component.translatable("gui.wikizoomer.resolution", getExportSize(), getExportSize());
@@ -80,9 +81,9 @@ public class GuiItemZoomer extends Screen {
                     : ExportTask.Background.GREENSCREEN;
             init();
         }).size(buttonWidth, buttonHeight).pos(col2X, row1Y).build());
-        this.addRenderableWidget(Button.builder(export, (button) -> {
+        this.exportButton = this.addRenderableWidget(Button.builder(getExportButtonText(), (button) -> {
             saveCurrentConfig();
-            ExportTask task = ExportManager.createItemTask(zoomerBase.getItem(0), sliderValue, background, getExportSize(), false, rotX, rotY);
+            ExportTask task = ExportManager.createItemTask(zoomerBase.getItem(0), sliderValue, background, getExportSize(), false, rotX, rotY, hasShiftDown());
             if (task == null) {
                 if (Minecraft.getInstance().player != null) {
                     Minecraft.getInstance().player.sendSystemMessage(Component.translatable("gui.wikizoomer.export_no_item"));
@@ -115,6 +116,7 @@ public class GuiItemZoomer extends Screen {
 
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+        exportButton.setMessage(getExportButtonText());
         if (getMinecraft() != null) {
             try {
                 if (background == ExportTask.Background.GREENSCREEN) {
@@ -224,6 +226,12 @@ public class GuiItemZoomer extends Screen {
         return background == ExportTask.Background.GREENSCREEN
                 ? Component.translatable("gui.wikizoomer.background.greenscreen")
                 : Component.translatable("gui.wikizoomer.background.transparent");
+    }
+
+    private Component getExportButtonText() {
+        boolean gif = !hasShiftDown() && ModConfig.EXPORT_ANIMATED_TEXTURES_AS_GIF.get()
+                && ExportManager.isItemAnimated(zoomerBase.getItem(0));
+        return Component.translatable(gif ? "gui.wikizoomer.export_gif" : "gui.wikizoomer.export_png");
     }
 
     @Override

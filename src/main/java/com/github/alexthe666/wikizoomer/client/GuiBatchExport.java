@@ -1,5 +1,6 @@
 package com.github.alexthe666.wikizoomer.client;
 
+import com.github.alexthe666.wikizoomer.ModConfig;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -30,6 +31,7 @@ public class GuiBatchExport extends Screen {
     private List<ModEntry> entries = new ArrayList<>();
     private boolean exportItems = true;
     private boolean exportEntities = true;
+    private boolean exportAnimatedGif = ModConfig.EXPORT_ANIMATED_TEXTURES_AS_GIF.get();
     private ExportTask.Background background = ExportTask.Background.GREENSCREEN;
     private int exportSizeIndex = findDefaultExportSizeIndex();
     private static final int[] EXPORT_SIZES = ExportManager.getExportSizes();
@@ -56,19 +58,20 @@ public class GuiBatchExport extends Screen {
         int col1X = startX;
         int col2X = startX + buttonWidth + spacing;
         int col3X = startX + (buttonWidth + spacing) * 2;
-        int row1Y = this.height - 90;
-        int row2Y = row1Y + 22;
-        int row3Y = row2Y + 22;
+        int row1Y = this.height - 100;
+        int row2Y = row1Y + 24;
+        int row3Y = row2Y + 24;
+        int row4Y = row3Y + 24;
         int listTop = 32;
         int listBottom = row1Y - 10;
         this.modList = new ModListWidget(this.minecraft, this.width, this.height, listTop, listBottom, 20, this.entries);
         this.addRenderableWidget(this.modList);
 
-        Button itemsButton = Button.builder(Component.translatable("gui.wikizoomer.batch_items", exportItems ? "ON" : "OFF"), (button) -> {
+        Button itemsButton = Button.builder(Component.translatable("gui.wikizoomer.batch_items", getToggleLabel(exportItems)), (button) -> {
             exportItems = !exportItems;
             init();
         }).size(buttonWidth, buttonHeight).pos(col1X, row1Y).build();
-        Button entitiesButton = Button.builder(Component.translatable("gui.wikizoomer.batch_entities", exportEntities ? "ON" : "OFF"), (button) -> {
+        Button entitiesButton = Button.builder(Component.translatable("gui.wikizoomer.batch_entities", getToggleLabel(exportEntities)), (button) -> {
             exportEntities = !exportEntities;
             init();
         }).size(buttonWidth, buttonHeight).pos(col2X, row1Y).build();
@@ -76,10 +79,14 @@ public class GuiBatchExport extends Screen {
             customBackground = true;
             background = background == ExportTask.Background.GREENSCREEN ? ExportTask.Background.TRANSPARENT : ExportTask.Background.GREENSCREEN;
             init();
-        }).size(buttonWidth, buttonHeight).pos(col3X, row1Y).build();
+        }).size(buttonWidth, buttonHeight).pos(col2X, row2Y).build();
         this.addRenderableWidget(itemsButton);
         this.addRenderableWidget(entitiesButton);
         this.addRenderableWidget(backgroundButton);
+        this.addRenderableWidget(Button.builder(Component.translatable("gui.wikizoomer.batch_gif", getToggleLabel(exportAnimatedGif)), button -> {
+            exportAnimatedGif = !exportAnimatedGif;
+            button.setMessage(Component.translatable("gui.wikizoomer.batch_gif", getToggleLabel(exportAnimatedGif)));
+        }).size(buttonWidth, buttonHeight).pos(col3X, row1Y).build());
 
         this.addRenderableWidget(new ForgeSlider(col1X, row2Y, buttonWidth, buttonHeight, Component.translatable("gui.wikizoomer.zoom"), Component.literal("%"), 1, 1000, zoomPercent, 1, 1, true) {
             @Override
@@ -101,19 +108,19 @@ public class GuiBatchExport extends Screen {
             customResolution = true;
             exportSizeIndex = (exportSizeIndex + 1) % EXPORT_SIZES.length;
             init();
-        }).size(buttonWidth, buttonHeight).pos(col2X, row2Y).build();
+        }).size(buttonWidth, buttonHeight).pos(col3X, row2Y).build();
         Button selectAllButton = Button.builder(Component.translatable("gui.wikizoomer.batch_select_all"), (button) -> {
             setAllSelected(true);
-        }).size(buttonWidth, buttonHeight).pos(col3X, row2Y).build();
+        }).size(buttonWidth, buttonHeight).pos(col1X, row3Y).build();
         this.addRenderableWidget(resolutionButton);
         this.addRenderableWidget(selectAllButton);
 
         Button clearButton = Button.builder(Component.translatable("gui.wikizoomer.batch_clear"), (button) -> {
             setAllSelected(false);
-        }).size(buttonWidth, buttonHeight).pos(col1X, row3Y).build();
+        }).size(buttonWidth, buttonHeight).pos(col2X, row3Y).build();
         Button startButton = Button.builder(Component.translatable("gui.wikizoomer.batch_start"), (button) -> {
             startExport();
-        }).size(buttonWidth, buttonHeight).pos(col2X, row3Y).build();
+        }).size(rowWidth, buttonHeight).pos(startX, row4Y).build();
         Button closeButton = Button.builder(Component.translatable("gui.wikizoomer.close"), (button) -> {
             Minecraft.getInstance().setScreen(null);
         }).size(buttonWidth, buttonHeight).pos(col3X, row3Y).build();
@@ -157,7 +164,7 @@ public class GuiBatchExport extends Screen {
                 if (id == null || !modIds.contains(id.getNamespace())) {
                     continue;
                 }
-                ExportTask task = ExportManager.createItemTask(new ItemStack(item), itemZoom, itemBackground, itemExportSize, true, itemConfig.rotX, itemConfig.rotY);
+                ExportTask task = ExportManager.createItemTask(new ItemStack(item), itemZoom, itemBackground, itemExportSize, true, itemConfig.rotX, itemConfig.rotY, !exportAnimatedGif);
                 if (task != null) {
                     tasks.add(task);
                 }
@@ -234,6 +241,10 @@ public class GuiBatchExport extends Screen {
             return Component.translatable("gui.wikizoomer.resolution_configured");
         }
         return Component.translatable("gui.wikizoomer.resolution", getExportSize(), getExportSize());
+    }
+
+    private static Component getToggleLabel(boolean enabled) {
+        return Component.translatable(enabled ? "gui.wikizoomer.on" : "gui.wikizoomer.off");
     }
 
     private Component getBackgroundLabel() {
