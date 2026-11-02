@@ -38,5 +38,9 @@
   "block.wikizoomer.item_zoomer.desc1": "按住 Shift 并右键打开渲染",
   "block.wikizoomer.entity_zoomer.desc0": "使用实体信息右键点击以设置",
   "block.wikizoomer.entity_zoomer.desc1": "按住 Shift 并右键打开渲染",
-  "itemGroup.wikizoomer": "Wiki Zoomer"
+  "itemGroup.wikizoomer": "Wiki Zoomer",
+  "gui.wikizoomer.export_gif": "导出 GIF",
+  "gui.wikizoomer.batch_gif": "动态 GIF：%s",
+  "gui.wikizoomer.on": "开启",
+  "gui.wikizoomer.off": "关闭"
 }
