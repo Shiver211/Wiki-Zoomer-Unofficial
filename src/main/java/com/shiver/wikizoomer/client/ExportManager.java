@@ -1,12 +1,14 @@
 package com.shiver.wikizoomer.client;
 
+import com.shiver.wikizoomer.ModConfig;
+import com.shiver.wikizoomer.client.gif.AnimatedGifEncoder;
+import com.shiver.wikizoomer.client.gif.GifFrame;
 import com.mojang.blaze3d.GpuFormat;
 import com.mojang.blaze3d.ProjectionType;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.pipeline.TextureTarget;
 import com.mojang.blaze3d.platform.Lighting;
-import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.GpuDevice;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
@@ -48,10 +50,21 @@ import org.joml.Vector4f;
 import org.joml.Vector4fc;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
 import java.lang.reflect.Field;
+import java.nio.ByteBuffer;
+import java.nio.file.Files;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Queue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class ExportManager {
     private static final Logger LOGGER = LogManager.getLogger();
@@ -66,6 +79,12 @@ public class ExportManager {
     private static boolean renderQueued = false;
     private static int batchRemaining = 0;
     private static FeatureRenderDispatcher cachedDispatcher;
+    private static final ExecutorService EXPORT_WORKERS = Executors.newFixedThreadPool(
+            Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors() / 2)), runnable -> {
+                Thread thread = new Thread(runnable, "WikiZoomer-ExportWorker");
+                thread.setDaemon(true);
+                return thread;
+            });
 
     public static int[] getExportSizes() {
         return EXPORT_SIZES.clone();
@@ -77,6 +96,10 @@ public class ExportManager {
 
     public static float getDefaultZoom() {
         return DEFAULT_ZOOM;
+    }
+
+    public static boolean isItemAnimated(ItemStack stack) {
+        return TextureAnimationHelper.isItemAnimated(stack);
     }
 
     public static ExportSettings getLastItemSettings() {
@@ -121,6 +144,11 @@ public class ExportManager {
 
     public static ExportTask createItemTask(ItemStack stack, float zoomPercent, ExportTask.Background background,
                                             int exportSize, boolean isBatch, float rotX, float rotY) {
+        return createItemTask(stack, zoomPercent, background, exportSize, isBatch, rotX, rotY, false);
+    }
+
+    public static ExportTask createItemTask(ItemStack stack, float zoomPercent, ExportTask.Background background,
+                                            int exportSize, boolean isBatch, float rotX, float rotY, boolean forcePng) {
         if (stack == null || stack.isEmpty()) {
             return null;
         }
@@ -128,8 +156,9 @@ public class ExportManager {
         if (id == null) {
             return null;
         }
-        File output = getOutputFile(id);
-        return ExportTask.forItem(stack, output, background, isBatch, zoomPercent, exportSize, rotX, rotY);
+        boolean isGif = !forcePng && ModConfig.EXPORT_ANIMATED_TEXTURES_AS_GIF.get() && isItemAnimated(stack);
+        File output = getOutputFile(id, isGif);
+        return ExportTask.forItem(stack, output, background, isBatch, zoomPercent, exportSize, rotX, rotY, isGif);
     }
 
     public static ExportTask createEntityTask(Entity entity, float zoomPercent, ExportTask.Background background,
@@ -176,14 +205,18 @@ public class ExportManager {
 
     private static void executeTask(Minecraft mc, ExportTask task) {
         try {
-            boolean success = renderTask(mc, task);
-            Minecraft.getInstance().execute(() -> handleResult(task, success));
+            if (!renderTask(mc, task)) {
+                handleResult(task, task.outputFile, false);
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Failed to render exported image", e);
+            handleResult(task, task.outputFile, false);
         } finally {
             renderQueued = false;
         }
     }
 
-    private static void handleResult(ExportTask task, boolean success) {
+    private static void handleResult(ExportTask task, File output, boolean success) {
         if (task.isBatch) {
             batchRemaining--;
             if (batchRemaining <= 0) {
@@ -191,15 +224,19 @@ public class ExportManager {
                 sendChat(Component.translatable("gui.wikizoomer.batch_done"));
             }
         } else if (success) {
-            sendChat(Component.translatable("gui.wikizoomer.export_done", task.outputFile.getName()));
+            sendChat(Component.translatable("gui.wikizoomer.export_done", output.getName()));
         }
     }
 
     private static File getOutputFile(Identifier id) {
+        return getOutputFile(id, false);
+    }
+
+    private static File getOutputFile(Identifier id, boolean isGif) {
         Minecraft mc = Minecraft.getInstance();
         File baseDir = new File(mc.gameDirectory, "wiki zoomer");
         File modDir = new File(baseDir, id.getNamespace());
-        return new File(modDir, id.getPath() + ".png");
+        return new File(modDir, id.getPath() + (isGif ? ".gif" : ".png"));
     }
 
     private static FeatureRenderDispatcher getFeatureRenderDispatcher() {
@@ -334,61 +371,140 @@ public class ExportManager {
     }
 
     private static boolean renderTask(Minecraft mc, ExportTask task) {
-        if (task.type == ExportTask.Type.ITEM && (task.itemStack == null || task.itemStack.isEmpty())) {
-            return false;
-        }
-
-        Entity entity = null;
-        if (task.type == ExportTask.Type.ENTITY) {
-            entity = resolveEntity(mc, task);
-            if (entity == null) {
-                return false;
-            }
-        }
-
+        if (task.type == ExportTask.Type.ITEM && task.itemStack.isEmpty()) return false;
+        Entity entity = task.type == ExportTask.Type.ENTITY ? resolveEntity(mc, task) : null;
+        if (task.type == ExportTask.Type.ENTITY && entity == null) return false;
         File output = task.outputFile;
         File parent = output.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
             LOGGER.warn("Could not create export directory: {}", parent.getAbsolutePath());
         }
-
+        boolean transparent = task.background == ExportTask.Background.TRANSPARENT;
+        if (task.isGif) {
+            List<CompletableFuture<BufferedImage>> images = captureGifFrames(mc, task);
+            if (!images.isEmpty()) {
+                File gifOutput = output;
+                CompletableFuture.allOf(images.toArray(CompletableFuture[]::new)).whenComplete((unused, error) -> {
+                    if (error != null) reportReadFailure(task, gifOutput, error);
+                    else writeAsync(task, gifOutput, () -> writeGif(mergeGifFrames(images), transparent, gifOutput));
+                });
+                return true;
+            }
+            output = new File(output.getParentFile(), output.getName().replaceFirst("\\.gif$", ".png"));
+        }
         renderPreviewToTarget(mc, task.type, task.itemStack, entity, task.zoomPercent, task.background,
                 task.exportSize, task.rotX, task.rotY, task.offsetX, task.offsetY);
-
-        boolean transparent = task.background == ExportTask.Background.TRANSPARENT;
-        GpuDevice device = RenderSystem.getDevice();
-
-        GpuTexture sourceTexture = renderTarget.getColorTexture();
-        if (sourceTexture != null) {
-            GpuBuffer readBuffer = device.createBuffer(() -> "wikizoomer export buffer", 9, (long) task.exportSize * task.exportSize * sourceTexture.getFormat().blockSize());
-            device.createCommandEncoder().copyTextureToBuffer(
-                sourceTexture,
-                readBuffer,
-                0L,
-                () -> {
-                    try (GpuBufferSlice.MappedView read = readBuffer.map(true, false);
-                         NativeImage image = new NativeImage(task.exportSize, task.exportSize, false)) {
-                        for (int y = 0; y < task.exportSize; y++) {
-                            for (int x = 0; x < task.exportSize; x++) {
-                                int abgr = read.data().getInt((x + y * task.exportSize) * sourceTexture.getFormat().blockSize());
-                                // PNG 使用非预乘颜色，避免半透明材质在图像软件中再次变暗。
-                                abgr = transparent ? unpremultiplyAlpha(abgr) : abgr | 0xFF000000;
-                                image.setPixelABGR(x, task.exportSize - y - 1, abgr);
-                            }
-                        }
-                        try {
-                            image.writeToFile(output);
-                        } catch (Exception e) {
-                            LOGGER.warn("Failed to write exported image", e);
-                        }
-                    } finally {
-                        readBuffer.close();
-                    }
-                },
-                0
-            );
-        }
+        File pngOutput = output;
+        readFrame(task.exportSize, transparent).whenComplete((image, error) -> {
+            if (error != null) reportReadFailure(task, pngOutput, error);
+            else writeAsync(task, pngOutput, () -> ImageIO.write(image, "png", pngOutput));
+        });
         return true;
+    }
+
+    private static List<CompletableFuture<BufferedImage>> captureGifFrames(Minecraft mc, ExportTask task) {
+        List<CompletableFuture<BufferedImage>> images = new ArrayList<>();
+        try (TextureAnimationHelper.Capture capture = TextureAnimationHelper.beginCapture(task.itemStack)) {
+            if (capture.periodTicks() <= 1) return images;
+            for (int tick = 0; tick < capture.periodTicks(); tick++) {
+                renderPreviewToTarget(mc, task.type, task.itemStack, null, task.zoomPercent, task.background,
+                        task.exportSize, task.rotX, task.rotY, 0.0F, 0.0F);
+                images.add(readFrame(task.exportSize, task.background == ExportTask.Background.TRANSPARENT));
+                capture.advance();
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Failed to capture animated texture; exporting PNG instead", e);
+            images.clear();
+        }
+        return images;
+    }
+
+    private static List<GifFrame> mergeGifFrames(List<CompletableFuture<BufferedImage>> images) {
+        List<GifFrame> frames = new ArrayList<>();
+        int[] previousPixels = null;
+        for (CompletableFuture<BufferedImage> future : images) {
+            BufferedImage image = future.join();
+            int[] pixels = image.getRGB(0, 0, image.getWidth(), image.getHeight(), null, 0, image.getWidth());
+            if (Arrays.equals(previousPixels, pixels)) frames.get(frames.size() - 1).delayCentiseconds += 5;
+            else {
+                frames.add(new GifFrame(image, 5));
+                previousPixels = pixels;
+            }
+        }
+        return frames;
+    }
+
+    private static void reportReadFailure(ExportTask task, File output, Throwable error) {
+        LOGGER.warn("Failed to read exported image: {}", output, error);
+        Minecraft.getInstance().execute(() -> handleResult(task, output, false));
+    }
+
+    private static CompletableFuture<BufferedImage> readFrame(int exportSize, boolean transparent) {
+        CompletableFuture<BufferedImage> result = new CompletableFuture<>();
+        GpuDevice device = RenderSystem.getDevice();
+        GpuTexture source = renderTarget.getColorTexture();
+        int pixelSize = source.getFormat().blockSize();
+        GpuBuffer readBuffer = device.createBuffer(() -> "wikizoomer export buffer", GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST,
+                (long) exportSize * exportSize * pixelSize);
+        try {
+            device.createCommandEncoder().copyTextureToBuffer(source, readBuffer, 0L, () -> {
+                try (GpuBufferSlice.MappedView read = readBuffer.map(true, false)) {
+                    BufferedImage image = new BufferedImage(exportSize, exportSize,
+                            transparent ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
+                    ByteBuffer pixels = read.data();
+                    for (int y = 0; y < exportSize; y++) {
+                        for (int x = 0; x < exportSize; x++) {
+                            int abgr = pixels.getInt((x + y * exportSize) * pixelSize);
+                            abgr = transparent ? unpremultiplyAlpha(abgr) : abgr | 0xFF000000;
+                            int argb = (abgr & 0xFF00FF00) | ((abgr & 0xFF) << 16) | ((abgr >>> 16) & 0xFF);
+                            image.setRGB(x, exportSize - y - 1, argb);
+                        }
+                    }
+                    result.complete(image);
+                } catch (Exception e) {
+                    result.completeExceptionally(e);
+                } finally {
+                    readBuffer.close();
+                }
+            }, 0);
+        } catch (RuntimeException e) {
+            readBuffer.close();
+            throw e;
+        }
+        return result;
+    }
+
+    private static void writeGif(List<GifFrame> frames, boolean transparent, File output) throws IOException {
+        AnimatedGifEncoder encoder = new AnimatedGifEncoder();
+        encoder.setTransparent(transparent);
+        encoder.setRepeat(0);
+        try (OutputStream stream = Files.newOutputStream(output.toPath())) {
+            if (!encoder.start(stream)) throw new IOException("Could not start GIF encoder");
+            for (GifFrame frame : frames) {
+                if (!encoder.addFrame(frame.image, frame.delayCentiseconds)) throw new IOException("Could not encode GIF frame");
+            }
+            if (!encoder.finish()) throw new IOException("Could not finish GIF encoder");
+        }
+    }
+
+    private static void writeAsync(ExportTask task, File output, ImageWriter writer) {
+        EXPORT_WORKERS.execute(() -> {
+            boolean success = false;
+            try {
+                writer.write();
+                success = true;
+            } catch (Exception e) {
+                LOGGER.warn("Failed to write exported image: {}", output, e);
+            }
+            boolean result = success;
+            // 完成提示和批量计数只在文件写入结束后更新。
+            Minecraft.getInstance().execute(() -> handleResult(task, output, result));
+        });
+    }
+
+    @FunctionalInterface
+    private interface ImageWriter {
+        void write() throws IOException;
     }
 
     private static int unpremultiplyAlpha(int abgr) {

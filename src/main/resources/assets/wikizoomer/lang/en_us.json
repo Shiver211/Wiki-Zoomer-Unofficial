@@ -38,5 +38,9 @@
   "block.wikizoomer.item_zoomer.desc1": "Shift right click to open render",
   "block.wikizoomer.entity_zoomer.desc0": "Right click with Entity Info to set",
   "block.wikizoomer.entity_zoomer.desc1": "Shift right click to open render",
-  "itemGroup.wikizoomer": "Wiki Zoomer"
+  "itemGroup.wikizoomer": "Wiki Zoomer",
+  "gui.wikizoomer.export_gif": "Export GIF",
+  "gui.wikizoomer.batch_gif": "Animated GIF: %s",
+  "gui.wikizoomer.on": "ON",
+  "gui.wikizoomer.off": "OFF"
 }
