@@ -12,6 +12,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.init.Items;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.text.TextComponentString;
+import net.minecraftforge.fml.client.config.GuiButtonExt;
 import net.minecraftforge.fml.common.Loader;
 import net.minecraftforge.fml.common.ModContainer;
 import net.minecraftforge.fml.common.registry.EntityEntry;
@@ -108,7 +109,7 @@ public class GuiBatchExport extends GuiScreen {
         this.selectAllButton = new GuiButton(4, col1X, row3Y, buttonWidth, buttonHeight, I18n.format("gui.wikizoomer.batch_select_all"));
         this.clearButton = new GuiButton(5, col2X, row3Y, buttonWidth, buttonHeight, I18n.format("gui.wikizoomer.batch_clear"));
         this.closeButton = new GuiButton(7, col3X, row3Y, buttonWidth, buttonHeight, I18n.format("gui.wikizoomer.close"));
-        this.startButton = new GuiButton(6, startX, row4Y, rowWidth, buttonHeight, I18n.format("gui.wikizoomer.batch_start"));
+        this.startButton = new GuiButtonExt(6, startX, row4Y, rowWidth, buttonHeight, I18n.format("gui.wikizoomer.batch_start"));
         this.buttonList.add(this.itemsButton);
         this.buttonList.add(this.entitiesButton);
         this.buttonList.add(this.gifButton);
@@ -232,6 +233,8 @@ public class GuiBatchExport extends GuiScreen {
                     }
                 }
             }
+            // 流体和气体属于物品导出，沿用物品的缩放、背景和分辨率。
+            tasks.addAll(FluidGasExport.createTasks(modIds, itemZoom, itemBg, itemSize, exportAnimatedGif));
         }
         if (exportEntities) {
             float entityZoom = useEntityConfig ? entityConfig.zoomPercent : zoomPercent;

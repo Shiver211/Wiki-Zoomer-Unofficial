@@ -9,7 +9,9 @@ import java.io.File;
 public class ExportTask {
     public enum Type {
         ITEM,
-        ENTITY
+        ENTITY,
+        FLUID,
+        GAS
     }
 
     public enum Background {
@@ -31,8 +33,14 @@ public class ExportTask {
     public final int offsetX;
     public final int offsetY;
     public final boolean isGif;
+    public final ResourceLocation texture;
+    public final int textureColor;
 
     private ExportTask(Type type, ItemStack itemStack, Entity entity, ResourceLocation entityId, File outputFile, Background background, boolean isBatch, float zoomPercent, int exportSize, float rotX, float rotY, int offsetX, int offsetY, boolean isGif) {
+        this(type, itemStack, entity, entityId, outputFile, background, isBatch, zoomPercent, exportSize, rotX, rotY, offsetX, offsetY, isGif, null, 0xFFFFFFFF);
+    }
+
+    private ExportTask(Type type, ItemStack itemStack, Entity entity, ResourceLocation entityId, File outputFile, Background background, boolean isBatch, float zoomPercent, int exportSize, float rotX, float rotY, int offsetX, int offsetY, boolean isGif, ResourceLocation texture, int textureColor) {
         this.type = type;
         this.itemStack = itemStack;
         this.entity = entity;
@@ -47,6 +55,12 @@ public class ExportTask {
         this.offsetX = offsetX;
         this.offsetY = offsetY;
         this.isGif = isGif;
+        this.texture = texture;
+        this.textureColor = textureColor;
+    }
+
+    public static ExportTask forTexture(Type type, ResourceLocation texture, int color, File outputFile, Background background, float zoomPercent, int exportSize, boolean isGif) {
+        return new ExportTask(type, ItemStack.EMPTY, null, null, outputFile, background, true, zoomPercent, exportSize, 0F, 0F, 0, 0, isGif, texture, color);
     }
 
     public static ExportTask forItem(ItemStack stack, File outputFile, Background background, boolean isBatch, float zoomPercent, int exportSize) {

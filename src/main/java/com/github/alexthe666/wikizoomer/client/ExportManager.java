@@ -4,15 +4,18 @@ import com.github.alexthe666.wikizoomer.ModConfig;
 import com.github.alexthe666.wikizoomer.client.gif.AnimatedGifEncoder;
 import com.github.alexthe666.wikizoomer.client.gif.GifFrame;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.BufferBuilder;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.renderer.OpenGlHelper;
 import net.minecraft.client.renderer.RenderItem;
 import net.minecraft.client.renderer.RenderHelper;
+import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.client.renderer.block.model.IBakedModel;
 import net.minecraft.client.renderer.block.model.ItemCameraTransforms;
 import net.minecraft.client.renderer.entity.RenderManager;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.renderer.texture.TextureMap;
+import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.client.resources.I18n;
 import net.minecraft.client.shader.Framebuffer;
 import net.minecraft.client.renderer.texture.TextureUtil;
@@ -237,6 +240,26 @@ public class ExportManager {
         return createEntityTask(entity, zoomPercent, background, exportSize, isBatch, -30F, 45F, offsetX, offsetY);
     }
 
+    public static ExportTask createTextureTask(ExportTask.Type type, ResourceLocation id, ResourceLocation texture,
+            int color, float zoomPercent, ExportTask.Background background, int exportSize, boolean animatedGif) {
+        if (texture == null) {
+            return null;
+        }
+        TextureMap atlas = Minecraft.getMinecraft().getTextureMapBlocks();
+        TextureAtlasSprite sprite = atlas.getAtlasSprite(texture.toString());
+        if (sprite == atlas.getMissingSprite()) {
+            LOGGER.warn("Skipping export of {}: missing texture {}", id, texture);
+            return null;
+        }
+        boolean isGif = animatedGif && ModConfig.exportAnimatedTexturesAsGif
+                && TextureAnimationHelper.isSpriteAnimated(sprite)
+                && TextureAnimationHelper.getSpritePeriodTicks(sprite) > 1;
+        String folder = type == ExportTask.Type.FLUID ? "fluids" : "gases";
+        File modDir = new File(new File(Minecraft.getMinecraft().gameDir, "wiki zoomer"), id.getNamespace());
+        File output = new File(new File(modDir, folder), id.getPath() + (isGif ? ".gif" : ".png"));
+        return ExportTask.forTexture(type, texture, color, output, background, zoomPercent, exportSize, isGif);
+    }
+
     public static ExportTask createEntityTask(Entity entity, float zoomPercent, ExportTask.Background background, int exportSize, boolean isBatch, float rotX, float rotY, int offsetX, int offsetY) {
         if (entity == null) {
             return null;
@@ -310,8 +333,8 @@ public class ExportManager {
             }
         }
 
-        if (task.type == ExportTask.Type.ITEM && task.isGif) {
-            if (renderItemGifTask(mc, task)) {
+        if (task.isGif) {
+            if (renderAnimatedTask(mc, task)) {
                 return true;
             }
             // fallback to single frame render if gif rendering could not proceed
@@ -354,10 +377,10 @@ public class ExportManager {
             GlStateManager.translate(0.0F, 0.0F, -2000.0F);
             pushedMatrices = true;
             GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
-            if (task.type == ExportTask.Type.ITEM) {
-                renderItem(task.itemStack, task.zoomPercent, exportSize, task.rotX, task.rotY);
-            } else {
+            if (task.type == ExportTask.Type.ENTITY) {
                 renderEntity(mc, entity, task.zoomPercent, exportSize, task.rotX, task.rotY, task.offsetX, task.offsetY);
+            } else {
+                renderFlatTask(mc, task, false);
             }
             boolean transparent = task.background == ExportTask.Background.TRANSPARENT;
             BufferedImage image = readFramebuffer(exportSize, exportSize, framebuffer, transparent);
@@ -393,8 +416,10 @@ public class ExportManager {
         return success;
     }
 
-    private static boolean renderItemGifTask(Minecraft mc, ExportTask task) {
-        Set<TextureAtlasSprite> animatedSprites = TextureAnimationHelper.getAnimatedSprites(task.itemStack);
+    private static boolean renderAnimatedTask(Minecraft mc, ExportTask task) {
+        Set<TextureAtlasSprite> animatedSprites = task.type == ExportTask.Type.ITEM
+                ? TextureAnimationHelper.getAnimatedSprites(task.itemStack)
+                : Collections.singleton(mc.getTextureMapBlocks().getAtlasSprite(task.texture.toString()));
         if (animatedSprites.isEmpty()) {
             return false;
         }
@@ -459,7 +484,7 @@ public class ExportManager {
                 pushedMatrices = true;
                 GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
 
-                renderItem(task.itemStack, task.zoomPercent, exportSize, task.rotX, task.rotY);
+                renderFlatTask(mc, task, true);
 
                 GlStateManager.popMatrix();
                 GlStateManager.matrixMode(GL11.GL_PROJECTION);
@@ -485,7 +510,7 @@ public class ExportManager {
                 }
             }
         } catch (Exception e) {
-            LOGGER.warn("Failed to render item GIF frames", e);
+            LOGGER.warn("Failed to render GIF frames for {}", task.outputFile, e);
             return false;
         } finally {
             if (pushedMatrices) {
@@ -560,6 +585,58 @@ public class ExportManager {
             return null;
         }
         return EntityList.createEntityByIDFromName(task.entityId, mc.world);
+    }
+
+    private static void renderFlatTask(Minecraft mc, ExportTask task, boolean gifFrame) {
+        if (task.type == ExportTask.Type.ITEM) {
+            renderItem(task.itemStack, task.zoomPercent, task.exportSize, task.rotX, task.rotY);
+        } else {
+            renderTexture(mc, task, gifFrame);
+        }
+    }
+
+    private static void renderTexture(Minecraft mc, ExportTask task, boolean gifFrame) {
+        TextureAtlasSprite sprite = mc.getTextureMapBlocks().getAtlasSprite(task.texture.toString());
+        float size = task.exportSize * task.zoomPercent / 100F;
+        float start = (task.exportSize - size) / 2F;
+        int color = task.textureColor;
+        GlStateManager.enableTexture2D();
+        GlStateManager.disableLighting();
+        GlStateManager.disableDepth();
+        GlStateManager.disableAlpha();
+        if (task.background == ExportTask.Background.TRANSPARENT && !gifFrame) {
+            // 单个平面直接写入直通 RGBA，避免透明 PNG 的 RGB 被透明度重复相乘。
+            GlStateManager.disableBlend();
+        } else {
+            // GIF 不支持半透明：在透明黑底上合成，将透明度动画保留为明暗变化。
+            GlStateManager.enableBlend();
+            GlStateManager.tryBlendFuncSeparate(GlStateManager.SourceFactor.SRC_ALPHA,
+                    GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA, GlStateManager.SourceFactor.ONE,
+                    GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA);
+        }
+        GlStateManager.color((color >> 16 & 255) / 255F, (color >> 8 & 255) / 255F,
+                (color & 255) / 255F, (color >>> 24) / 255F);
+        mc.getTextureManager().bindTexture(TextureMap.LOCATION_BLOCKS_TEXTURE);
+        mc.getTextureManager().getTexture(TextureMap.LOCATION_BLOCKS_TEXTURE).setBlurMipmap(false, false);
+        try {
+            Tessellator tessellator = Tessellator.getInstance();
+            BufferBuilder buffer = tessellator.getBuffer();
+            buffer.begin(GL11.GL_QUADS, DefaultVertexFormats.POSITION_TEX);
+            buffer.pos(start, start + size, 0).tex(sprite.getMinU(), sprite.getMaxV()).endVertex();
+            buffer.pos(start + size, start + size, 0).tex(sprite.getMaxU(), sprite.getMaxV()).endVertex();
+            buffer.pos(start + size, start, 0).tex(sprite.getMaxU(), sprite.getMinV()).endVertex();
+            buffer.pos(start, start, 0).tex(sprite.getMinU(), sprite.getMinV()).endVertex();
+            tessellator.draw();
+        } finally {
+            mc.getTextureManager().getTexture(TextureMap.LOCATION_BLOCKS_TEXTURE).restoreLastBlurMipmap();
+            GlStateManager.color(1F, 1F, 1F, 1F);
+            GlStateManager.enableAlpha();
+            GlStateManager.enableDepth();
+            GlStateManager.enableBlend();
+            GlStateManager.tryBlendFuncSeparate(GlStateManager.SourceFactor.SRC_ALPHA,
+                    GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA, GlStateManager.SourceFactor.ONE,
+                    GlStateManager.DestFactor.ZERO);
+        }
     }
 
     private static void renderItem(ItemStack stack, float zoomPercent, int exportSize, float rotX, float rotY) {
