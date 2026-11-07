@@ -337,7 +337,7 @@ public class ExportManager {
             if (renderAnimatedTask(mc, task)) {
                 return true;
             }
-            // fallback to single frame render if gif rendering could not proceed
+            // 动画不可用或合并后不足两帧时，按 PNG 重新渲染以保留半透明。
         }
 
         int exportSize = task.exportSize;
@@ -538,7 +538,7 @@ public class ExportManager {
             }
         }
 
-        if (frames.isEmpty()) {
+        if (frames.size() <= 1) {
             return false;
         }
 
